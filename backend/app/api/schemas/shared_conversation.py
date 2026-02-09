@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SharedConversationCreate(BaseModel):
@@ -23,6 +23,8 @@ class SharedConversationUpdate(BaseModel):
 class SharedConversationResponse(BaseModel):
     """Schema for shared conversation response."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     request_id: UUID
     share_id: str
@@ -33,12 +35,11 @@ class SharedConversationResponse(BaseModel):
     updated_at: datetime
     share_url: str
 
-    class Config:
-        from_attributes = True
-
 
 class PublicConversationResponse(BaseModel):
     """Schema for public conversation view."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     share_id: str
     content: str
@@ -50,6 +51,3 @@ class PublicConversationResponse(BaseModel):
     execution_mode: str
     created_at: datetime
     view_count: int
-
-    class Config:
-        from_attributes = True
