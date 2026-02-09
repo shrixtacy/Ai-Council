@@ -6,7 +6,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -36,16 +36,18 @@ class CouncilRequestCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
     execution_mode: str = Field(default="balanced")
     
-    @validator('execution_mode')
-    def validate_execution_mode(cls, v):
+    @field_validator('execution_mode')
+    @classmethod
+    def validate_execution_mode(cls, v: str) -> str:
         """Validate execution mode."""
         valid_modes = ["fast", "balanced", "best_quality"]
         if v not in valid_modes:
             raise ValueError(f"execution_mode must be one of: {', '.join(valid_modes)}")
         return v
     
-    @validator('content')
-    def validate_content_length(cls, v):
+    @field_validator('content')
+    @classmethod
+    def validate_content_length(cls, v: str) -> str:
         """Validate content length."""
         if len(v) < 1:
             raise ValueError("content must not be empty")
