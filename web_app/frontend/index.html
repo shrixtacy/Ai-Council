@@ -1,10 +1,28 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" :class="{ 'dark': darkMode }">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Council - Multi-Agent Orchestration</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            bg: '#0f172a',
+                            card: '#1e293b',
+                            border: '#334155',
+                            text: '#e2e8f0',
+                            muted: '#94a3b8'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -86,9 +104,36 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
         }
+        /* Dark mode scrollbar */
+        .dark ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        .dark ::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
+        .dark ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+        /* Dark mode markdown */
+        .dark .markdown-content {
+            color: #e2e8f0;
+        }
+        .dark .markdown-content h1,
+        .dark .markdown-content h2,
+        .dark .markdown-content h3 {
+            color: #f1f5f9;
+        }
+        .dark .markdown-content code {
+            background: #334155;
+            color: #f87171;
+        }
+        .dark .markdown-content blockquote {
+            border-left-color: #60a5fa;
+            color: #94a3b8;
+        }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 dark:bg-dark-bg transition-colors duration-300">
     <div id="app">
         <div class="min-h-screen">
             <!-- Header -->
@@ -103,6 +148,18 @@
                             </div>
                         </div>
                         <div class="flex items-center space-x-4">
+                            <!-- Dark Mode Toggle -->
+                            <button @click="toggleDarkMode" 
+                                    class="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition"
+                                    :title="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
+                                <i :class="darkMode ? 'fas fa-sun' : 'fas fa-moon'" class="text-xl"></i>
+                            </button>
+                            <!-- Keyboard Shortcuts -->
+                            <button @click="showShortcuts = true" 
+                                    class="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition"
+                                    title="Keyboard Shortcuts (?)">
+                                <i class="fas fa-keyboard text-xl"></i>
+                            </button>
                             <div class="text-right">
                                 <div class="text-sm text-blue-100">System Status</div>
                                 <div class="flex items-center space-x-2">
@@ -122,38 +179,38 @@
                     <!-- Left Sidebar - Controls -->
                     <div class="lg:col-span-1 space-y-6">
                         <!-- Execution Mode -->
-                        <div class="bg-white rounded-lg shadow-md p-6">
-                            <h2 class="text-xl font-bold mb-4 flex items-center">
+                        <div class="bg-white dark:bg-dark-card rounded-lg shadow-md p-6 transition-colors">
+                            <h2 class="text-xl font-bold mb-4 flex items-center dark:text-dark-text">
                                 <i class="fas fa-sliders-h mr-2 text-blue-600"></i>
                                 Execution Mode
                             </h2>
                             <div class="space-y-3">
-                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"
-                                       :class="mode === 'fast' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'">
+                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 transition"
+                                       :class="mode === 'fast' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-dark-border'">
                                     <input type="radio" v-model="mode" value="fast" class="mr-3">
                                     <div class="flex-1">
-                                        <div class="font-semibold">Fast</div>
-                                        <div class="text-xs text-gray-600">Optimized for speed</div>
+                                        <div class="font-semibold dark:text-dark-text">Fast</div>
+                                        <div class="text-xs text-gray-600 dark:text-dark-muted">Optimized for speed</div>
                                     </div>
                                     <i class="fas fa-bolt text-yellow-500"></i>
                                 </label>
                                 
-                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"
-                                       :class="mode === 'balanced' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'">
+                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 transition"
+                                       :class="mode === 'balanced' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-dark-border'">
                                     <input type="radio" v-model="mode" value="balanced" class="mr-3">
                                     <div class="flex-1">
-                                        <div class="font-semibold">Balanced</div>
-                                        <div class="text-xs text-gray-600">Speed & quality balance</div>
+                                        <div class="font-semibold dark:text-dark-text">Balanced</div>
+                                        <div class="text-xs text-gray-600 dark:text-dark-muted">Speed & quality balance</div>
                                     </div>
                                     <i class="fas fa-balance-scale text-blue-500"></i>
                                 </label>
                                 
-                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition"
-                                       :class="mode === 'best_quality' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'">
+                                <label class="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 transition"
+                                       :class="mode === 'best_quality' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-dark-border'">
                                     <input type="radio" v-model="mode" value="best_quality" class="mr-3">
                                     <div class="flex-1">
-                                        <div class="font-semibold">Best Quality</div>
-                                        <div class="text-xs text-gray-600">Maximum quality</div>
+                                        <div class="font-semibold dark:text-dark-text">Best Quality</div>
+                                        <div class="text-xs text-gray-600 dark:text-dark-muted">Maximum quality</div>
                                     </div>
                                     <i class="fas fa-star text-purple-500"></i>
                                 </label>
@@ -161,30 +218,30 @@
                         </div>
 
                         <!-- System Info -->
-                        <div class="bg-white rounded-lg shadow-md p-6">
-                            <h2 class="text-xl font-bold mb-4 flex items-center">
+                        <div class="bg-white dark:bg-dark-card rounded-lg shadow-md p-6 transition-colors">
+                            <h2 class="text-xl font-bold mb-4 flex items-center dark:text-dark-text">
                                 <i class="fas fa-info-circle mr-2 text-blue-600"></i>
                                 System Info
                             </h2>
                             <div class="space-y-3 text-sm">
                                 <div class="flex justify-between">
-                                    <span class="text-gray-600">Available Models:</span>
-                                    <span class="font-semibold">{{ availableModels }}</span>
+                                    <span class="text-gray-600 dark:text-dark-muted">Available Models:</span>
+                                    <span class="font-semibold dark:text-dark-text">{{ availableModels }}</span>
                                 </div>
                                 <div class="flex justify-between">
-                                    <span class="text-gray-600">Total Requests:</span>
-                                    <span class="font-semibold">{{ totalRequests }}</span>
+                                    <span class="text-gray-600 dark:text-dark-muted">Total Requests:</span>
+                                    <span class="font-semibold dark:text-dark-text">{{ totalRequests }}</span>
                                 </div>
                                 <div class="flex justify-between">
-                                    <span class="text-gray-600">Total Cost:</span>
-                                    <span class="font-semibold">${{ totalCost.toFixed(4) }}</span>
+                                    <span class="text-gray-600 dark:text-dark-muted">Total Cost:</span>
+                                    <span class="font-semibold dark:text-dark-text">${{ totalCost.toFixed(4) }}</span>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Quick Actions -->
-                        <div class="bg-white rounded-lg shadow-md p-6">
-                            <h2 class="text-xl font-bold mb-4 flex items-center">
+                        <div class="bg-white dark:bg-dark-card rounded-lg shadow-md p-6 transition-colors">
+                            <h2 class="text-xl font-bold mb-4 flex items-center dark:text-dark-text">
                                 <i class="fas fa-rocket mr-2 text-blue-600"></i>
                                 Quick Actions
                             </h2>
@@ -199,17 +256,43 @@
                                 </button>
                             </div>
                         </div>
+
+                        <!-- Query History -->
+                        <div class="bg-white dark:bg-dark-card rounded-lg shadow-md p-6 transition-colors">
+                            <h2 class="text-xl font-bold mb-4 flex items-center dark:text-dark-text">
+                                <i class="fas fa-history mr-2 text-blue-600"></i>
+                                Query History
+                                <button v-if="queryHistory.length > 0" 
+                                        @click="clearHistory" 
+                                        class="ml-auto text-xs text-gray-500 dark:text-dark-muted hover:text-red-600 transition">
+                                    <i class="fas fa-trash mr-1"></i>Clear
+                                </button>
+                            </h2>
+                            <div v-if="queryHistory.length === 0" class="text-center text-gray-400 dark:text-dark-muted py-4 text-sm">
+                                <i class="fas fa-clock text-2xl mb-2"></i>
+                                <p>No queries yet</p>
+                            </div>
+                            <div v-else class="space-y-2 max-h-48 overflow-y-auto">
+                                <button v-for="(item, index) in queryHistory.slice().reverse().slice(0, 10)" 
+                                        :key="index"
+                                        @click="reuseQuery(item.query)"
+                                        class="w-full text-left p-2 text-sm rounded-lg border border-gray-200 dark:border-dark-border hover:bg-blue-50 dark:hover:bg-blue-900/30 transition truncate dark:text-dark-text">
+                                    <i class="fas fa-redo-alt mr-2 text-blue-500"></i>
+                                    {{ item.query.substring(0, 40) }}{{ item.query.length > 40 ? '...' : '' }}
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Main Chat Area -->
                     <div class="lg:col-span-2 space-y-6">
                         <!-- Chat Messages -->
-                        <div class="bg-white rounded-lg shadow-md flex flex-col" style="height: calc(100vh - 200px); min-height: 600px;">
-                            <div class="p-6 border-b">
-                                <h2 class="text-xl font-bold flex items-center">
+                        <div class="bg-white dark:bg-dark-card rounded-lg shadow-md flex flex-col transition-colors" style="height: calc(100vh - 200px); min-height: 600px;">
+                            <div class="p-6 border-b dark:border-dark-border">
+                                <h2 class="text-xl font-bold flex items-center dark:text-dark-text">
                                     <i class="fas fa-comments mr-2 text-blue-600"></i>
                                     Conversation
-                                    <button @click="clearChat" class="ml-auto text-sm text-gray-500 hover:text-red-600 transition">
+                                    <button @click="clearChat" class="ml-auto text-sm text-gray-500 dark:text-dark-muted hover:text-red-600 transition">
                                         <i class="fas fa-trash mr-1"></i>Clear
                                     </button>
                                 </h2>
@@ -217,24 +300,25 @@
                             
                             <!-- Messages Container -->
                             <div ref="messagesContainer" class="flex-1 overflow-y-auto p-6 space-y-4" style="scroll-behavior: smooth;">
-                                <div v-if="messages.length === 0" class="text-center text-gray-400 py-12">
+                                <div v-if="messages.length === 0" class="text-center text-gray-400 dark:text-dark-muted py-12">
                                     <i class="fas fa-comment-dots text-6xl mb-4"></i>
                                     <p class="text-lg">Start a conversation with AI Council</p>
                                     <p class="text-sm mt-2">Powered by Google Gemini 2.5 Flash</p>
+                                    <p class="text-xs mt-4 opacity-75">Press <kbd class="px-2 py-1 bg-gray-200 dark:bg-dark-border rounded">?</kbd> for keyboard shortcuts</p>
                                 </div>
                                 
                                 <div v-for="(message, index) in messages" :key="index" 
                                      class="flex animate-fade-in" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
                                     <div class="max-w-[85%] rounded-lg p-4 shadow-md" 
-                                         :class="message.role === 'user' ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white' : 'bg-gradient-to-r from-gray-50 to-gray-100'">
+                                         :class="message.role === 'user' ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white' : 'bg-gradient-to-r from-gray-50 to-gray-100 dark:from-slate-700 dark:to-slate-800'">>
                                         <div class="flex items-center mb-2">
                                             <div class="w-8 h-8 rounded-full flex items-center justify-center mr-2"
                                                  :class="message.role === 'user' ? 'bg-blue-500' : 'bg-purple-500'">
                                                 <i :class="message.role === 'user' ? 'fa-user' : 'fa-robot'" 
                                                    class="fas text-white text-sm"></i>
                                             </div>
-                                            <span class="font-semibold">{{ message.role === 'user' ? 'You' : 'AI Council' }}</span>
-                                            <span class="ml-auto text-xs opacity-75">{{ message.timestamp }}</span>
+                                            <span class="font-semibold dark:text-dark-text">{{ message.role === 'user' ? 'You' : 'AI Council' }}</span>
+                                            <span class="ml-auto text-xs opacity-75 dark:text-dark-muted">{{ message.timestamp }}</span>
                                         </div>
                                         <div v-if="message.role === 'assistant'" 
                                              class="markdown-content prose prose-sm max-w-none" 
@@ -243,7 +327,7 @@
                                         
                                         <!-- Metadata for assistant messages -->
                                         <div v-if="message.role === 'assistant' && message.metadata" 
-                                             class="mt-3 pt-3 border-t border-gray-300 text-xs space-y-1">
+                                             class="mt-3 pt-3 border-t border-gray-300 dark:border-dark-border text-xs space-y-1">
                                             <div class="grid grid-cols-2 gap-2">
                                                 <div class="flex items-center">
                                                     <i class="fas fa-clock mr-1 text-blue-600"></i>
@@ -268,14 +352,14 @@
                                 
                                 <!-- Loading indicator -->
                                 <div v-if="isProcessing" class="flex justify-start animate-fade-in">
-                                    <div class="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg p-4 shadow-md">
+                                    <div class="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-slate-700 dark:to-slate-800 rounded-lg p-4 shadow-md">
                                         <div class="flex items-center space-x-3">
                                             <div class="pulse-slow">
                                                 <i class="fas fa-robot text-blue-600 text-xl"></i>
                                             </div>
                                             <div>
-                                                <div class="font-semibold text-gray-700">AI Council is thinking...</div>
-                                                <div class="text-xs text-gray-500">Processing with {{ mode }} mode</div>
+                                                <div class="font-semibold text-gray-700 dark:text-dark-text">AI Council is thinking...</div>
+                                                <div class="text-xs text-gray-500 dark:text-dark-muted">Processing with {{ mode }} mode</div>
                                             </div>
                                         </div>
                                     </div>
@@ -283,13 +367,13 @@
                             </div>
 
                             <!-- Input Area -->
-                            <div class="border-t bg-gray-50 p-4">
+                            <div class="border-t dark:border-dark-border bg-gray-50 dark:bg-slate-800 p-4">
                                 <div class="flex space-x-2">
                                     <textarea v-model="query" 
                                               @keydown.enter.ctrl="processQuery"
                                               @keydown.enter.exact.prevent="processQuery"
                                               placeholder="Ask AI Council anything... (Enter to send, Shift+Enter for new line)"
-                                              class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                              class="flex-1 px-4 py-3 border-2 border-gray-300 dark:border-dark-border dark:bg-dark-card dark:text-dark-text rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-colors"
                                               rows="2"></textarea>
                                     <button @click="processQuery" 
                                             :disabled="isProcessing || !query.trim()"
@@ -297,7 +381,7 @@
                                         <i class="fas fa-paper-plane text-lg"></i>
                                     </button>
                                 </div>
-                                <div class="mt-2 text-xs text-gray-500 flex items-center justify-between">
+                                <div class="mt-2 text-xs text-gray-500 dark:text-dark-muted flex items-center justify-between">
                                     <span><i class="fas fa-info-circle mr-1"></i>Enter to send, Shift+Enter for new line</span>
                                     <span>{{ query.length }} characters</span>
                                 </div>
@@ -362,7 +446,51 @@
                         
                         <div v-else class="text-center py-8">
                             <i class="fas fa-spinner fa-spin text-4xl text-blue-600 mb-4"></i>
-                            <p class="text-gray-600">Analyzing trade-offs...</p>
+                            <p class="text-gray-600 dark:text-dark-muted">Analyzing trade-offs...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Keyboard Shortcuts Modal -->
+            <div v-if="showShortcuts" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" @click.self="showShortcuts = false">
+                <div class="bg-white dark:bg-dark-card rounded-lg shadow-xl max-w-md w-full animate-fade-in">
+                    <div class="p-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h2 class="text-2xl font-bold dark:text-dark-text">
+                                <i class="fas fa-keyboard mr-2 text-blue-600"></i>
+                                Keyboard Shortcuts
+                            </h2>
+                            <button @click="showShortcuts = false" class="text-gray-500 dark:text-dark-muted hover:text-gray-700 dark:hover:text-dark-text">
+                                <i class="fas fa-times text-xl"></i>
+                            </button>
+                        </div>
+                        
+                        <div class="space-y-4">
+                            <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                                <span class="dark:text-dark-text">Send message</span>
+                                <kbd class="px-3 py-1 bg-gray-200 dark:bg-dark-border rounded font-mono text-sm dark:text-dark-text">Enter</kbd>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                                <span class="dark:text-dark-text">New line in message</span>
+                                <kbd class="px-3 py-1 bg-gray-200 dark:bg-dark-border rounded font-mono text-sm dark:text-dark-text">Shift + Enter</kbd>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                                <span class="dark:text-dark-text">Toggle dark mode</span>
+                                <kbd class="px-3 py-1 bg-gray-200 dark:bg-dark-border rounded font-mono text-sm dark:text-dark-text">D</kbd>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                                <span class="dark:text-dark-text">Show shortcuts</span>
+                                <kbd class="px-3 py-1 bg-gray-200 dark:bg-dark-border rounded font-mono text-sm dark:text-dark-text">?</kbd>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                                <span class="dark:text-dark-text">Focus input</span>
+                                <kbd class="px-3 py-1 bg-gray-200 dark:bg-dark-border rounded font-mono text-sm dark:text-dark-text">/</kbd>
+                            </div>
+                            <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-slate-700 rounded-lg">
+                                <span class="dark:text-dark-text">Close modal</span>
+                                <kbd class="px-3 py-1 bg-gray-200 dark:bg-dark-border rounded font-mono text-sm dark:text-dark-text">Esc</kbd>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -386,13 +514,112 @@
                     totalCost: 0,
                     showAnalysis: false,
                     analysisData: null,
-                    apiUrl: 'http://localhost:8000'
+                    apiUrl: 'http://localhost:8000',
+                    darkMode: false,
+                    showShortcuts: false,
+                    queryHistory: []
                 };
             },
             mounted() {
                 this.checkSystemStatus();
+                this.loadDarkMode();
+                this.loadQueryHistory();
+                this.setupKeyboardShortcuts();
             },
             methods: {
+                // Dark mode methods
+                toggleDarkMode() {
+                    this.darkMode = !this.darkMode;
+                    localStorage.setItem('darkMode', this.darkMode);
+                    this.applyDarkMode();
+                },
+                loadDarkMode() {
+                    const saved = localStorage.getItem('darkMode');
+                    if (saved !== null) {
+                        this.darkMode = saved === 'true';
+                    } else {
+                        // Check system preference
+                        this.darkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    }
+                    this.applyDarkMode();
+                },
+                applyDarkMode() {
+                    if (this.darkMode) {
+                        document.documentElement.classList.add('dark');
+                    } else {
+                        document.documentElement.classList.remove('dark');
+                    }
+                },
+                
+                // Query history methods
+                loadQueryHistory() {
+                    const saved = localStorage.getItem('queryHistory');
+                    if (saved) {
+                        this.queryHistory = JSON.parse(saved);
+                    }
+                },
+                saveQueryHistory() {
+                    localStorage.setItem('queryHistory', JSON.stringify(this.queryHistory));
+                },
+                addToHistory(query) {
+                    // Avoid duplicates, keep last 20
+                    this.queryHistory = this.queryHistory.filter(item => item.query !== query);
+                    this.queryHistory.push({ query, timestamp: new Date().toISOString() });
+                    if (this.queryHistory.length > 20) {
+                        this.queryHistory = this.queryHistory.slice(-20);
+                    }
+                    this.saveQueryHistory();
+                },
+                reuseQuery(query) {
+                    this.query = query;
+                    // Focus the textarea
+                    this.$nextTick(() => {
+                        document.querySelector('textarea')?.focus();
+                    });
+                },
+                clearHistory() {
+                    if (confirm('Clear query history?')) {
+                        this.queryHistory = [];
+                        this.saveQueryHistory();
+                    }
+                },
+                
+                // Keyboard shortcuts
+                setupKeyboardShortcuts() {
+                    document.addEventListener('keydown', (e) => {
+                        // Ignore if user is typing in textarea
+                        const isTyping = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
+                        
+                        // Escape closes modals
+                        if (e.key === 'Escape') {
+                            this.showShortcuts = false;
+                            this.showAnalysis = false;
+                            return;
+                        }
+                        
+                        // Don't process shortcuts while typing (except Escape)
+                        if (isTyping) return;
+                        
+                        // ? shows shortcuts
+                        if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+                            e.preventDefault();
+                            this.showShortcuts = !this.showShortcuts;
+                        }
+                        
+                        // D toggles dark mode
+                        if (e.key === 'd' || e.key === 'D') {
+                            e.preventDefault();
+                            this.toggleDarkMode();
+                        }
+                        
+                        // / focuses input
+                        if (e.key === '/') {
+                            e.preventDefault();
+                            document.querySelector('textarea')?.focus();
+                        }
+                    });
+                },
+                
                 async checkSystemStatus() {
                     try {
                         const response = await fetch(`${this.apiUrl}/api/status`);
@@ -413,6 +640,9 @@
                         timestamp: new Date().toLocaleTimeString()
                     };
                     this.messages.push(userMessage);
+                    
+                    // Save to history
+                    this.addToHistory(this.query);
 
                     const currentQuery = this.query;
                     this.query = '';
