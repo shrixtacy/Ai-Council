@@ -155,3 +155,10 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "htmlcov"]
+skips = ["B101"]  # Skip assert warnings in non-test code
+
+[tool.bandit.assert_used]
+skips = ["*_test.py", "test_*.py", "conftest.py"]

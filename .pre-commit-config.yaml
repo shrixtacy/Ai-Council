@@ -1,0 +1,78 @@
+# Pre-commit hooks for AI Council Orchestrator
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: debug-statements
+
+  # Python code formatting
+  - repo: https://github.com/psf/black
+    rev: 24.1.1
+    hooks:
+      - id: black
+        language_version: python3
+
+  # Import sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile", "black"]
+
+  # Linting
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        args: ['--max-line-length=88', '--extend-ignore=E203,W503']
+        additional_dependencies:
+          - flake8-bugbear
+          - flake8-comprehensions
+
+  # Type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        args: ['--ignore-missing-imports']
+        additional_dependencies:
+          - pydantic>=2.0
+          - types-PyYAML
+
+  # Security checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.7
+    hooks:
+      - id: bandit
+        args: ['-c', 'pyproject.toml', '-r', 'ai_council/']
+        additional_dependencies: ['bandit[toml]']
+
+  # Markdown formatting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.39.0
+    hooks:
+      - id: markdownlint-fix
+        args: ['--disable', 'MD013', 'MD033', 'MD041', '--']
+
+# CI configuration
+ci:
+  autofix_commit_msg: 'style: auto-fix by pre-commit hooks'
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: 'chore: update pre-commit hooks'
+  autoupdate_schedule: monthly
+  skip: [mypy]  # Skip mypy in CI as it runs separately
+  submodules: false
