@@ -71,6 +71,50 @@ print(f"Models Used: {', '.join(response.models_used)}")
 print(f"Cost: ${response.cost_breakdown.total_cost:.4f}")
 ```
 
+## 🛠 Local Development Setup
+
+This section explains how to set up and run AI Council locally after cloning the repository.
+It is intended for contributors and developers.
+### 1. Clone the repository
+```bash
+git clone https://github.com/shrixtacy/Ai-Council.git
+cd Ai-Council
+
+### 2. Create and activate a virtual environment (recommended)
+
+```bash
+# Windows
+python -m venv venv
+venv\Scripts\activate
+
+# macOS / Linux
+python3 -m venv venv
+source venv/bin/activate
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+
+### 4️⃣ Verify the setup
+
+```bash
+python -c "from ai_council.factory import AICouncilFactory; print('AI Council setup successful')"
+
+
+### 5️⃣ Run the project locally
+You can run example scripts to verify everything works:
+
+```bash
+python examples/basic_usage.py
+
+### ⚠️ Common Issues
+
+- Ensure Python version is **3.8+**
+- Always activate the virtual environment before running commands
+- Make sure required API keys are added to the `.env` file
+- If port `8000` is busy, stop other services using it
+
 ### Web Interface (Testing & Development)
 
 AI Council includes a web interface for easy testing and interaction:
