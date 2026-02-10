@@ -306,7 +306,7 @@ print(f"Circuit Breakers: {status.circuit_breakers}")
 | **[🎯 Orchestrator Guide](./docs/ORCHESTRATOR_GUIDE.md)** | Advanced orchestration patterns |
 | **[⚡ Quick Reference](./docs/QUICK_REFERENCE.md)** | Common tasks and snippets |
 | **[📊 Business Case](./docs/business/BUSINESS_CASE.md)** | ROI and business value |
-| **[� Publishing Guide](./docs/PUBLISHING_GUIDE.md)** | How to publish to PyPI |e
+| **[📦 Publishing Guide](./docs/PUBLISHING_GUIDE.md)** | How to publish to PyPI 
 
 ## 🧪 Testing & Validation
 
@@ -372,7 +372,7 @@ cost:
 
 ### Quality Assurance
 - 🧪 **95 Passing Tests**: Comprehensive test suite with 95 test cases
-- � **45%m Code Coverage**: Continuous coverage monitoring
+- 📦 **45% Code Coverage**: Continuous coverage monitoring
 - 🔍 **Type Checking**: Full mypy type checking support
 - 📝 **Documentation**: Comprehensive documentation and examples
 - 🏗️ **Clean Architecture**: Production-ready design patterns
