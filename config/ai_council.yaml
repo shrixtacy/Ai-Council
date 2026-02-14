@@ -37,8 +37,8 @@ models:
     max_context_length: 131072
     timeout_seconds: 45.0
 
-  # Google Gemini 2.5 Flash - ENABLED (Working!)
-  gemini-2.5-flash:
+  # Google Gemini 1.5 Flash - ENABLED (Working!)
+  gemini-1.5-flash:
     enabled: true
     provider: google
     api_key_env: GOOGLE_API_KEY
