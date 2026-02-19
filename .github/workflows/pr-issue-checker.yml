@@ -1,0 +1,178 @@
+name: PR Issue Link Checker
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  check-linked-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for linked issues
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const prNumber = pr.number;
+            const prBody = pr.body || '';
+            const prTitle = pr.title || '';
+            const prAuthor = pr.user.login;
+            
+            // Patterns to detect issue references (more selective to avoid false positives)
+            const issuePatterns = [
+              // Keywords with issue numbers: "Fixes #123", "Closes #456", etc.
+              /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi,
+              // Keywords with full GitHub URLs
+              /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+https?:\/\/github\.com\/[^\/]+\/[^\/]+\/issues\/(\d+)/gi,
+              // Issue keyword followed by number: "Issue #123", "issue: #456"
+              /\bissue[:\s]+#(\d+)/gi,
+              // Full GitHub issue URLs without keywords
+              /https?:\/\/github\.com\/[^\/]+\/[^\/]+\/issues\/(\d+)/gi
+            ];
+            
+            let linkedIssues = new Set();
+            
+            // Check PR body and title for issue references
+            const textToCheck = `${prTitle} ${prBody}`;
+            
+            // Remove markdown code blocks to avoid false positives
+            const textWithoutCodeBlocks = textToCheck.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '');
+            
+            // Remove markdown headings to avoid false positives (e.g., "# 1. Introduction")
+            const textWithoutHeadings = textWithoutCodeBlocks.replace(/^#+\s+\d+/gm, '');
+            
+            for (const pattern of issuePatterns) {
+              const matches = textWithoutHeadings.matchAll(pattern);
+              for (const match of matches) {
+                const issueNum = match[1];
+                if (issueNum) {
+                  // Filter out false positives
+                  const matchContext = match.input.substring(Math.max(0, match.index - 10), match.index);
+                  
+                  // Skip if preceded by "PR" or "pull" (e.g., "PR #123")
+                  if (/\b(?:pr|pull)\s*$/i.test(matchContext)) {
+                    console.log(`Skipping #${issueNum} - appears to be a PR reference`);
+                    continue;
+                  }
+                  
+                  // Skip if it matches the current PR number
+                  if (parseInt(issueNum) === prNumber) {
+                    console.log(`Skipping #${issueNum} - matches current PR number`);
+                    continue;
+                  }
+                  
+                  linkedIssues.add(issueNum);
+                }
+              }
+            }
+            
+            console.log(`Found ${linkedIssues.size} linked issue(s): ${Array.from(linkedIssues).join(', ')}`);
+            
+            // Verify if linked issues exist and are open
+            let validIssues = [];
+            let invalidIssues = [];
+            
+            for (const issueNum of linkedIssues) {
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: parseInt(issueNum)
+                });
+                
+                if (issue.state === 'open') {
+                  validIssues.push(issueNum);
+                } else {
+                  invalidIssues.push(`#${issueNum} (closed)`);
+                }
+              } catch (error) {
+                invalidIssues.push(`#${issueNum} (not found)`);
+              }
+            }
+            
+            // Check if there are any existing comments from this bot
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+            
+            const botComments = comments.filter(c => 
+              c.user.type === 'Bot' && 
+              c.body.includes('Issue Link Status')
+            );
+            
+            // Delete old bot comments
+            for (const comment of botComments) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: comment.id
+              });
+            }
+            
+            // Generate appropriate message
+            let commentBody = '';
+            
+            if (validIssues.length > 0) {
+              // PR has valid linked issues
+              commentBody = `### ✅ Issue Link Status\n\n`;
+              commentBody += `Great job @${prAuthor}! This PR is linked to the following issue(s):\n\n`;
+              validIssues.forEach(num => {
+                commentBody += `- Closes #${num}\n`;
+              });
+              
+              if (invalidIssues.length > 0) {
+                commentBody += `\n⚠️ **Note:** Some references point to closed or non-existent issues: ${invalidIssues.join(', ')}\n`;
+              }
+              
+              commentBody += `\n📋 **Reminder:**\n`;
+              commentBody += `- Ensure your changes address the linked issue(s)\n`;
+              commentBody += `- All tests should pass\n`;
+              commentBody += `- Follow the project's coding standards\n`;
+              commentBody += `- Update documentation if needed\n`;
+              
+            } else {
+              // No valid linked issues found
+              commentBody = `### ⚠️ Issue Link Status\n\n`;
+              commentBody += `Hey @${prAuthor}! It looks like this PR doesn't have a linked issue.\n\n`;
+              commentBody += `**Please do one of the following:**\n\n`;
+              commentBody += `1️⃣ **Link to an existing open issue:**\n`;
+              commentBody += `   - Add \`Fixes #<issue_number>\` or \`Closes #<issue_number>\` to the PR description\n`;
+              commentBody += `   - Example: \`Fixes #42\` or \`Closes #123\`\n\n`;
+              commentBody += `2️⃣ **Create a new issue first:**\n`;
+              commentBody += `   - If this addresses a new problem/feature, please create an issue first\n`;
+              commentBody += `   - Describe the problem and proposed solution\n`;
+              commentBody += `   - Then link it to this PR\n\n`;
+              commentBody += `3️⃣ **Mark as new issue (if urgent):**\n`;
+              commentBody += `   - If this is a critical fix that can't wait, add a comment explaining:\n`;
+              commentBody += `     - What problem this solves\n`;
+              commentBody += `     - Why it couldn't wait for an issue to be created\n`;
+              commentBody += `     - Tag it with \`[NEW ISSUE]\` in your comment\n\n`;
+              
+              if (invalidIssues.length > 0) {
+                commentBody += `\n❌ **Invalid references found:** ${invalidIssues.join(', ')}\n`;
+                commentBody += `Please update these to point to valid open issues.\n\n`;
+              }
+              
+              commentBody += `---\n`;
+              commentBody += `💡 **Why is this important?**\n`;
+              commentBody += `Linking PRs to issues helps us:\n`;
+              commentBody += `- Track progress and maintain project history\n`;
+              commentBody += `- Understand the context of changes\n`;
+              commentBody += `- Ensure all changes are properly documented\n`;
+            }
+            
+            // Post the comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: commentBody
+            });
+            
+            console.log('Issue link check completed');

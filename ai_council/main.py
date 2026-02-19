@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .core.models import ExecutionMode, FinalResponse
+from .core.exceptions import (
+    AICouncilError, ConfigurationError, ModelTimeoutError, 
+    AuthenticationError, RateLimitError, ProviderError, 
+    ValidationError, OrchestrationError
+)
 from .core.interfaces import OrchestrationLayer
 from .utils.config import AICouncilConfig, load_config
 from .utils.logging import configure_logging, get_logger
@@ -51,6 +56,13 @@ class AICouncil:
         # Create factory for dependency injection
         self.factory = AICouncilFactory(self.config)
         
+        # Validate configuration
+        validation_issues = self.factory.validate_configuration()
+        if validation_issues:
+            error_msg = "Configuration validation failed:\n" + "\n".join(f"- {issue}" for issue in validation_issues)
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
+        
         # Initialize orchestration layer
         self.orchestration_layer: OrchestrationLayer = self.factory.create_orchestration_layer()
         
@@ -84,6 +96,86 @@ class AICouncil:
             
             return response
             
+        except ConfigurationError as e:
+            self.logger.error(f"Configuration error: {str(e)}")
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message=str(e),
+                error_type="ConfigurationError",
+                models_used=[]
+            )
+        except ValidationError as e:
+            self.logger.warning(f"Validation error: {str(e)}")
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message=str(e),
+                error_type="ValidationError",
+                models_used=[]
+            )
+        except AuthenticationError as e:
+            self.logger.error(f"Authentication failed: {str(e)}")
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message=str(e),
+                error_type="AuthenticationError",
+                models_used=[]
+            )
+        except ModelTimeoutError as e:
+            self.logger.error(f"Request timed out: {str(e)}")
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message=str(e),
+                error_type="ModelTimeoutError",
+                models_used=[]
+            )
+        except RateLimitError as e:
+            self.logger.warning(f"Rate limit exceeded: {str(e)}")
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message=str(e),
+                error_type="RateLimitError",
+                models_used=[]
+            )
+        except ProviderError as e:
+            self.logger.error(f"Provider error: {str(e)}")
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message=str(e),
+                error_type="ProviderError",
+                models_used=[]
+            )
+        except OrchestrationError as e:
+            self.logger.error(f"Orchestration error: {str(e)}")
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message=str(e),
+                error_type="OrchestrationError",
+                models_used=[]
+            )
+        except AICouncilError as e:
+            self.logger.error(f"Generic AI Council error: {str(e)}")
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message=str(e),
+                error_type="AICouncilError",
+                models_used=[]
+            )
         except Exception as e:
             self.logger.error(f"Unexpected error processing request: {str(e)}")
             return FinalResponse(
@@ -91,6 +183,7 @@ class AICouncil:
                 overall_confidence=0.0,
                 success=False,
                 error_message=f"System error: {str(e)}",
+                error_type="SystemError",
                 models_used=[]
             )
     
@@ -224,23 +317,10 @@ def main():
     This function provides a simple command-line interface for testing
     the AI Council system.
     """
-    import argparse
+    from .cli_utils import CLIHandler
     
-    parser = argparse.ArgumentParser(description="AI Council - Multi-Agent Orchestration System")
-    parser.add_argument("--config", type=Path, help="Path to configuration file")
-    parser.add_argument("--mode", choices=["fast", "balanced", "best_quality"], 
-                       default="balanced", help="Execution mode")
-    parser.add_argument("--estimate-only", action="store_true", 
-                       help="Only estimate cost and time, don't execute")
-    parser.add_argument("--analyze-tradeoffs", action="store_true",
-                       help="Analyze cost vs quality trade-offs")
-    parser.add_argument("--status", action="store_true",
-                       help="Show system status and exit")
-    parser.add_argument("--interactive", action="store_true",
-                       help="Start interactive mode")
-    parser.add_argument("request", nargs="?", help="User request to process")
-    
-    args = parser.parse_args()
+    cli_handler = CLIHandler()
+    args = cli_handler.parse_args()
     
     try:
         # Initialize AI Council
@@ -248,141 +328,31 @@ def main():
         
         # Handle status request
         if args.status:
-            status = ai_council.get_system_status()
-            print("\n" + "="*60)
-            print("AI COUNCIL SYSTEM STATUS")
-            print("="*60)
-            print(f"Status: {status.get('status', 'unknown')}")
-            
-            if 'available_models' in status:
-                print(f"\nAvailable Models ({len(status['available_models'])}):")
-                for model in status['available_models']:
-                    print(f"  - {model['id']}: {', '.join(model['capabilities'])}")
-            
-            if 'health' in status:
-                health = status['health']
-                print(f"\nSystem Health: {health.get('overall_health', 'unknown')}")
-                if 'circuit_breakers' in health:
-                    print(f"Circuit Breakers: {len(health['circuit_breakers'])} active")
-            
-            if 'configuration' in status:
-                config = status['configuration']
-                print(f"\nConfiguration:")
-                print(f"  Default Mode: {config.get('default_execution_mode', 'unknown')}")
-                print(f"  Max Parallel: {config.get('max_parallel_executions', 'unknown')}")
-                print(f"  Max Cost: ${config.get('max_cost_per_request', 0)}")
-            
+            cli_handler.print_system_status(ai_council)
             return
         
         # Handle interactive mode
         if args.interactive:
-            print("\n" + "="*60)
-            print("AI COUNCIL INTERACTIVE MODE")
-            print("="*60)
-            print("Enter your requests (type 'quit' to exit, 'status' for system status)")
-            print("Commands: estimate <request>, analyze <request>, help")
-            
-            while True:
-                try:
-                    user_input = input("\n> ").strip()
-                    
-                    if user_input.lower() in ['quit', 'exit']:
-                        break
-                    elif user_input.lower() == 'status':
-                        status = ai_council.get_system_status()
-                        print(f"System Status: {status.get('status', 'unknown')}")
-                        continue
-                    elif user_input.lower() == 'help':
-                        print("Commands:")
-                        print("  estimate <request> - Estimate cost and time")
-                        print("  analyze <request>  - Analyze trade-offs")
-                        print("  status            - Show system status")
-                        print("  quit              - Exit interactive mode")
-                        print("  <request>         - Process request")
-                        continue
-                    elif user_input.startswith('estimate '):
-                        request = user_input[9:]
-                        estimate = ai_council.estimate_cost(request, ExecutionMode(args.mode))
-                        print(f"Estimated Cost: ${estimate.get('estimated_cost', 0):.4f}")
-                        print(f"Estimated Time: {estimate.get('estimated_time', 0):.1f}s")
-                        print(f"Confidence: {estimate.get('confidence', 0):.2f}")
-                        continue
-                    elif user_input.startswith('analyze '):
-                        request = user_input[8:]
-                        analysis = ai_council.analyze_tradeoffs(request)
-                        if 'error' not in analysis:
-                            print("Trade-off Analysis:")
-                            for mode, data in analysis.items():
-                                if mode != 'recommendations':
-                                    print(f"  {mode}: ${data.get('total_cost', 0):.4f}, "
-                                          f"{data.get('total_time', 0):.1f}s, "
-                                          f"quality: {data.get('average_quality', 0):.2f}")
-                        else:
-                            print(f"Analysis failed: {analysis['error']}")
-                        continue
-                    
-                    if not user_input:
-                        continue
-                    
-                    # Process the request
-                    execution_mode = ExecutionMode(args.mode)
-                    response = ai_council.process_request(user_input, execution_mode)
-                    
-                    print(f"\nResponse (confidence: {response.overall_confidence:.2f}):")
-                    print(response.content)
-                    
-                    if response.execution_metadata:
-                        print(f"\nExecution Details:")
-                        print(f"  Models Used: {', '.join(response.models_used)}")
-                        print(f"  Execution Time: {response.execution_metadata.total_execution_time:.2f}s")
-                        if response.cost_breakdown:
-                            print(f"  Cost: ${response.cost_breakdown.total_cost:.4f}")
-                    
-                except KeyboardInterrupt:
-                    print("\nExiting...")
-                    break
-                except Exception as e:
-                    print(f"Error: {str(e)}")
-            
+            cli_handler.handle_interactive_mode(ai_council, args.mode)
             return
         
         # Handle single request
         if not args.request:
-            parser.print_help()
+            cli_handler.parser.print_help()
             return
-        
-        execution_mode = ExecutionMode(args.mode)
         
         # Handle estimate-only request
         if args.estimate_only:
-            estimate = ai_council.estimate_cost(args.request, execution_mode)
-            print(f"\nCost Estimate for '{args.request[:50]}...':")
-            print(f"  Estimated Cost: ${estimate.get('estimated_cost', 0):.4f}")
-            print(f"  Estimated Time: {estimate.get('estimated_time', 0):.1f}s")
-            print(f"  Confidence: {estimate.get('confidence', 0):.2f}")
+            cli_handler.handle_estimate_only(ai_council, args.request, args.mode)
             return
         
         # Handle trade-off analysis
         if args.analyze_tradeoffs:
-            analysis = ai_council.analyze_tradeoffs(args.request)
-            if 'error' not in analysis:
-                print(f"\nTrade-off Analysis for '{args.request[:50]}...':")
-                for mode, data in analysis.items():
-                    if mode != 'recommendations':
-                        print(f"\n{mode.upper()}:")
-                        print(f"  Cost: ${data.get('total_cost', 0):.4f}")
-                        print(f"  Time: {data.get('total_time', 0):.1f}s")
-                        print(f"  Quality: {data.get('average_quality', 0):.2f}")
-                
-                if 'recommendations' in analysis:
-                    print(f"\nRecommendations:")
-                    for criterion, recommendation in analysis['recommendations'].items():
-                        print(f"  {criterion.replace('_', ' ').title()}: {recommendation}")
-            else:
-                print(f"Analysis failed: {analysis['error']}")
+            cli_handler.handle_tradeoff_analysis(ai_council, args.request)
             return
         
         # Process the request
+        execution_mode = ExecutionMode(args.mode)
         print(f"\nProcessing request in {execution_mode.value} mode...")
         response = ai_council.process_request(args.request, execution_mode)
         
@@ -411,7 +381,8 @@ def main():
     finally:
         # Cleanup
         try:
-            ai_council.shutdown()
+            if 'ai_council' in locals():
+                ai_council.shutdown()
         except:
             pass
 

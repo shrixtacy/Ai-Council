@@ -6,3 +6,4 @@ pydantic>=2.0.0
 python-dotenv>=1.0.0
 httpx>=0.24.0
 structlog>=23.0.0
+

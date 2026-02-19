@@ -6,7 +6,7 @@ echo.
 
 REM Check if backend dependencies are installed
 echo [1/3] Checking dependencies...
-python -c "import fastapi" 2>nul
+python -c "import fastapi; import ai_council" 2>nul
 if errorlevel 1 (
     echo Installing backend dependencies...
     cd backend
@@ -38,7 +38,9 @@ REM Start frontend
 echo [3/3] Opening frontend...
 timeout /t 2 /nobreak >nul
 start http://localhost:8000/api/status
-start frontend\index.html
+start "AI Council Frontend Server" cmd /k "cd frontend && python -m http.server 8080"
+timeout /t 2 /nobreak >nul
+start http://localhost:8080/
 
 echo.
 echo ========================================
@@ -46,7 +48,7 @@ echo   AI Council is running!
 echo ========================================
 echo.
 echo Backend API: http://localhost:8000
-echo Frontend: Open frontend\index.html in your browser
+echo Frontend: http://localhost:8080
 echo.
 echo Press Ctrl+C in the backend window to stop
 echo.

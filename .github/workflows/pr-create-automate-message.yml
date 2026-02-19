@@ -18,7 +18,7 @@ jobs:
           script: |
             const prNumber = context.issue.number;
 
-            const commentBody = `### Thanks for creating a PR for your Issue! ☺️\n\nWe'll review it as soon as possible.\nIn the meantime, please double-check the **file changes** and ensure that **all commits** are accurate.\n\nIf there are any **unresolved review comments**, feel free to resolve them. 🙌🏼`;
+            const commentBody = `### 🎉 Thanks for creating a PR!\n\nWe'll review it as soon as possible. ☺️\n\n📝 **Pre-Review Checklist:**\n- ✅ Double-check the **file changes** tab\n- ✅ Ensure **all commits** are accurate and properly formatted\n- ✅ Verify that your PR is linked to an issue (our bot will check this)\n- ✅ All tests pass locally\n- ✅ Code follows project style guidelines\n\n💬 **Review Process:**\n- If there are any **unresolved review comments**, please address them\n- Respond to reviewer feedback promptly\n- Keep your branch up to date with the base branch\n\nThank you for your contribution! 🙌🏼`;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -27,4 +27,4 @@ jobs:
               body: commentBody
             });
 
-            console.log('Comment added successfully.');
+            console.log('Welcome comment added successfully.');

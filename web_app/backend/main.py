@@ -19,10 +19,24 @@ from ai_council.core.models import ExecutionMode
 
 app = FastAPI(title="AI Council API", version="1.0.0")
 
+# CORS configuration
+import os
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_str:
+    allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+else:
+    # Default to localhost/local IPs for development
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000"
+    ]
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,9 +72,25 @@ async def startup_event():
             os.environ['AI_COUNCIL_CONFIG'] = str(config_path)
         
         ai_council = AICouncil(config_path if config_path.exists() else None)
-        print("✓ AI Council initialized successfully")
+        print("[OK] AI Council initialized successfully")
+    except RuntimeError as e:
+        # Handle configuration validation errors gracefully without stack trace
+        if "Configuration validation failed" in str(e):
+            print("\n" + "="*60)
+            print("[CRITICAL] STARTUP FAILED DUE TO CONFIGURATION ERRORS")
+            print("="*60)
+            print(str(e).replace("Configuration validation failed:", "").strip())
+            print("="*60 + "\n")
+            import sys
+            sys.exit(1)
+        
+        # Fall through for other RuntimeErrors
+        print(f"[ERROR] Failed to initialize AI Council: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
     except Exception as e:
-        print(f"✗ Failed to initialize AI Council: {str(e)}")
+        print(f"[ERROR] Failed to initialize AI Council: {str(e)}")
         import traceback
         traceback.print_exc()
         raise

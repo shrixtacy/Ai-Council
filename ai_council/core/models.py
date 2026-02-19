@@ -196,6 +196,7 @@ class FinalResponse:
     timestamp: datetime = field(default_factory=datetime.utcnow)
     success: bool = True
     error_message: Optional[str] = None
+    error_type: Optional[str] = None
 
     def __post_init__(self) -> None:
         """Validate final response data after initialization."""

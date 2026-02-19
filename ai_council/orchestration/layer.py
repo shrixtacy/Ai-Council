@@ -21,6 +21,11 @@ from ..core.failure_handling import (
 from ..core.timeout_handler import (
     timeout_handler, adaptive_timeout_manager, with_adaptive_timeout, TimeoutError
 )
+from ..core.exceptions import (
+    AICouncilError, ConfigurationError, ModelTimeoutError, 
+    AuthenticationError, RateLimitError, ProviderError, 
+    ValidationError, OrchestrationError
+)
 from .cost_optimizer import CostOptimizer
 
 
@@ -162,9 +167,9 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 execution_metadata.execution_path.append("task_creation")
             except Exception as e:
                 logger.error(f"Task creation failed: {str(e)}")
-                return self._create_degraded_response(
-                    "Failed to analyze input", execution_metadata, start_time, str(e)
-                )
+                if isinstance(e, AICouncilError):
+                    raise
+                raise ValidationError(f"Failed to analyze input: {str(e)}", original_error=e)
             
             # Stage 2: Cost Estimation (if required by execution mode)
             if execution_mode != ExecutionMode.FAST:
@@ -283,9 +288,12 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             
         except TimeoutError as e:
             logger.error(f"Request processing timed out: {str(e)}")
-            return self._create_timeout_response(execution_metadata, start_time, str(e))
+            raise ModelTimeoutError(f"Request processing timed out: {str(e)}", original_error=e)
             
         except Exception as e:
+            if isinstance(e, AICouncilError):
+                raise
+            
             logger.error(f"Request processing failed: {str(e)}")
             execution_time = time.time() - start_time
             
@@ -449,7 +457,12 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 execution_mode=execution_mode
             )
         
-        return self.analysis_cb.call(protected_analysis)
+        try:
+            return self.analysis_cb.call(protected_analysis)
+        except Exception as e:
+            if isinstance(e, AICouncilError):
+                raise
+            raise OrchestrationError(f"Analysis engine failure: {str(e)}", original_error=e)
     
     def _decompose_task_protected(self, task: Task) -> List[Subtask]:
         """Decompose task into subtasks with circuit breaker protection."""
@@ -463,21 +476,36 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             
             return subtasks
         
-        return self.decomposer_cb.call(protected_decomposition)
+        try:
+            return self.decomposer_cb.call(protected_decomposition)
+        except Exception as e:
+            if isinstance(e, AICouncilError):
+                raise
+            raise OrchestrationError(f"Task decomposer failure: {str(e)}", original_error=e)
     
     def _arbitrate_with_protection(self, responses: List[AgentResponse]):
         """Arbitrate responses with circuit breaker protection."""
         def protected_arbitration():
             return self.arbitration_layer.arbitrate(responses)
         
-        return self.arbitration_cb.call(protected_arbitration)
+        try:
+            return self.arbitration_cb.call(protected_arbitration)
+        except Exception as e:
+            if isinstance(e, AICouncilError):
+                raise
+            raise OrchestrationError(f"Arbitration layer failure: {str(e)}", original_error=e)
     
     def _synthesize_with_protection(self, validated_responses: List[AgentResponse]) -> FinalResponse:
         """Synthesize final response with circuit breaker protection."""
         def protected_synthesis():
             return self.synthesis_layer.synthesize(validated_responses)
         
-        return self.synthesis_cb.call(protected_synthesis)
+        try:
+            return self.synthesis_cb.call(protected_synthesis)
+        except Exception as e:
+            if isinstance(e, AICouncilError):
+                raise
+            raise OrchestrationError(f"Synthesis layer failure: {str(e)}", original_error=e)
     
     def _create_fallback_subtask(self, task: Task) -> Subtask:
         """Create a fallback subtask when decomposition fails."""
