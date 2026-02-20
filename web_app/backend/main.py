@@ -1,15 +1,23 @@
 """
 FastAPI backend for AI Council web interface.
 """
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
+
+# Rate limiting imports
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Add ai_council to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -17,7 +25,61 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from ai_council.main import AICouncil
 from ai_council.core.models import ExecutionMode
 
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
+class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
+    """Middleware to add rate limit headers to responses."""
+    
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Get rate limit info from limiter
+        if hasattr(request.state, 'rate_limit'):
+            limit = request.state.rate_limit.get("limit", 100)
+            remaining = request.state.rate_limit.get("remaining", 100)
+            reset = request.state.rate_limit.get("reset", int(time.time()) + 900)
+        else:
+            # Default values if rate limit info not available
+            limit = 100
+            remaining = 100
+            reset = int(time.time()) + 900
+        
+        # Add rate limit headers
+        response.headers["X-RateLimit-Limit"] = str(limit)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = str(reset)
+        
+        return response
+
 app = FastAPI(title="AI Council API", version="1.0.0")
+
+# Add rate limiting middleware
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(RateLimitHeaderMiddleware)
+
+# Rate limit exceeded handler
+app.state.limiter = limiter
+
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    """Custom rate limit exceeded handler with proper headers."""
+    retry_after = int(exc.detail.split(" ")[-1]) if " " in exc.detail else 900
+    return JSONResponse(
+        status_code=429,
+        content={
+            "success": False,
+            "message": "Too many requests",
+            "retryAfter": retry_after
+        },
+        headers={
+            "Retry-After": str(retry_after),
+            "X-RateLimit-Limit": "100",
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(int(time.time()) + retry_after)
+        }
+    )
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # CORS middleware
 app.add_middleware(
@@ -77,7 +139,8 @@ async def root():
 
 
 @app.get("/api/status")
-async def get_status():
+@limiter.limit("100/15minutes")
+async def get_status(request: Request):
     """Get system status."""
     try:
         status = ai_council.get_system_status()
@@ -87,7 +150,8 @@ async def get_status():
 
 
 @app.post("/api/process")
-async def process_request(request: RequestModel):
+@limiter.limit("100/15minutes")
+async def process_request(request: Request, req: RequestModel):
     """Process a user request."""
     try:
         # Map mode string to ExecutionMode
@@ -97,10 +161,10 @@ async def process_request(request: RequestModel):
             "best_quality": ExecutionMode.BEST_QUALITY
         }
         
-        mode = mode_map.get(request.mode.lower(), ExecutionMode.BALANCED)
+        mode = mode_map.get(req.mode.lower(), ExecutionMode.BALANCED)
         
         # Process the request
-        response = ai_council.process_request(request.query, mode)
+        response = ai_council.process_request(req.query, mode)
         
         return {
             "success": response.success,
@@ -119,7 +183,8 @@ async def process_request(request: RequestModel):
 
 
 @app.post("/api/estimate")
-async def estimate_cost(request: EstimateModel):
+@limiter.limit("100/15minutes")
+async def estimate_cost(request: Request, req: EstimateModel):
     """Estimate cost and time for a request."""
     try:
         mode_map = {
@@ -128,8 +193,8 @@ async def estimate_cost(request: EstimateModel):
             "best_quality": ExecutionMode.BEST_QUALITY
         }
         
-        mode = mode_map.get(request.mode.lower(), ExecutionMode.BALANCED)
-        estimate = ai_council.estimate_cost(request.query, mode)
+        mode = mode_map.get(req.mode.lower(), ExecutionMode.BALANCED)
+        estimate = ai_council.estimate_cost(req.query, mode)
         
         return estimate
     except Exception as e:
@@ -137,10 +202,11 @@ async def estimate_cost(request: EstimateModel):
 
 
 @app.post("/api/analyze")
-async def analyze_tradeoffs(request: RequestModel):
+@limiter.limit("100/15minutes")
+async def analyze_tradeoffs(request: Request, req: RequestModel):
     """Analyze cost-quality trade-offs."""
     try:
-        analysis = ai_council.analyze_tradeoffs(request.query)
+        analysis = ai_council.analyze_tradeoffs(req.query)
         return analysis
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
