@@ -147,6 +147,55 @@
                                 <p class="text-blue-100 text-sm">Multi-Agent Orchestration System</p>
                             </div>
                         </div>
+
+                        <!-- Orchestration (real backend data)
+                             Why: the FastAPI backend returns orchestration metadata (execution_path, arbitration_decisions,
+                             synthesis_notes). Rendering it here replaces any "mock" orchestration UI with the real pipeline
+                             stages produced by the AI Council orchestration layers. -->
+                        <div class="bg-white dark:bg-dark-card rounded-lg shadow-md p-6 transition-colors">
+                            <h2 class="text-xl font-bold mb-4 flex items-center dark:text-dark-text">
+                                <i class="fas fa-project-diagram mr-2 text-blue-600"></i>
+                                Orchestration
+                            </h2>
+
+                            <div v-if="!orchestrationData" class="text-center text-gray-400 dark:text-dark-muted py-4 text-sm">
+                                <i class="fas fa-route text-2xl mb-2"></i>
+                                <p>No orchestration data yet</p>
+                            </div>
+
+                            <div v-else class="space-y-4 text-sm">
+                                <div>
+                                    <div class="font-semibold mb-2 dark:text-dark-text">Execution Path</div>
+                                    <ol class="space-y-1 pl-5 list-decimal">
+                                        <!-- `executionPath` comes from backend `execution_path` and shows the orchestration stages
+                                             (task_creation → task_decomposition → arbitration → synthesis, etc.). -->
+                                        <li v-for="(step, i) in orchestrationData.executionPath" :key="`path-${i}`" class="dark:text-dark-text">
+                                            {{ step }}
+                                        </li>
+                                    </ol>
+                                </div>
+
+                                <div v-if="orchestrationData.arbitrationDecisions.length">
+                                    <div class="font-semibold mb-2 dark:text-dark-text">Arbitration Decisions</div>
+                                    <ul class="space-y-1 pl-5 list-disc">
+                                        <!-- Decisions are produced when multiple agent responses are compared/resolved. -->
+                                        <li v-for="(d, i) in orchestrationData.arbitrationDecisions" :key="`arb-${i}`" class="dark:text-dark-text">
+                                            {{ d }}
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div v-if="orchestrationData.synthesisNotes.length">
+                                    <div class="font-semibold mb-2 dark:text-dark-text">Synthesis Notes</div>
+                                    <ul class="space-y-1 pl-5 list-disc">
+                                        <!-- Notes are recorded during synthesis/formatting of the final answer. -->
+                                        <li v-for="(n, i) in orchestrationData.synthesisNotes" :key="`syn-${i}`" class="dark:text-dark-text">
+                                            {{ n }}
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
                         <div class="flex items-center space-x-4">
                             <!-- Dark Mode Toggle -->
                             <button @click="toggleDarkMode" 
@@ -310,7 +359,7 @@
                                 <div v-for="(message, index) in messages" :key="index" 
                                      class="flex animate-fade-in" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
                                     <div class="max-w-[85%] rounded-lg p-4 shadow-md" 
-                                         :class="message.role === 'user' ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white' : 'bg-gradient-to-r from-gray-50 to-gray-100 dark:from-slate-700 dark:to-slate-800'">>
+                                         :class="message.role === 'user' ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white' : 'bg-gradient-to-r from-gray-50 to-gray-100 dark:from-slate-700 dark:to-slate-800'">
                                         <div class="flex items-center mb-2">
                                             <div class="w-8 h-8 rounded-full flex items-center justify-center mr-2"
                                                  :class="message.role === 'user' ? 'bg-blue-500' : 'bg-purple-500'">
@@ -377,6 +426,8 @@
                                               rows="2"></textarea>
                                     <button @click="processQuery" 
                                             :disabled="isProcessing || !query.trim()"
+                                            aria-label="Send message"
+                                            title="Send message"
                                             class="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed shadow-md">
                                         <i class="fas fa-paper-plane text-lg"></i>
                                     </button>
@@ -397,7 +448,7 @@
                     <div class="p-6">
                         <div class="flex justify-between items-center mb-4">
                             <h2 class="text-2xl font-bold">Cost-Quality Trade-off Analysis</h2>
-                            <button @click="showAnalysis = false" class="text-gray-500 hover:text-gray-700">
+                            <button @click="showAnalysis = false" class="text-gray-500 hover:text-gray-700" aria-label="Close trade-off analysis" title="Close">
                                 <i class="fas fa-times text-2xl"></i>
                             </button>
                         </div>
@@ -461,7 +512,7 @@
                                 <i class="fas fa-keyboard mr-2 text-blue-600"></i>
                                 Keyboard Shortcuts
                             </h2>
-                            <button @click="showShortcuts = false" class="text-gray-500 dark:text-dark-muted hover:text-gray-700 dark:hover:text-dark-text">
+                            <button @click="showShortcuts = false" class="text-gray-500 dark:text-dark-muted hover:text-gray-700 dark:hover:text-dark-text" aria-label="Close keyboard shortcuts" title="Close">
                                 <i class="fas fa-times text-xl"></i>
                             </button>
                         </div>
@@ -508,6 +559,10 @@
                     mode: 'balanced',
                     messages: [],
                     isProcessing: false,
+                    // This is the authoritative orchestration payload for the *last* AI response.
+                    // We keep it separate from `messages` so the UI can update the visualizer panel
+                    // even if message rendering changes later.
+                    orchestrationData: null,
                     systemStatus: 'checking...',
                     availableModels: 0,
                     totalRequests: 0,
@@ -527,6 +582,16 @@
                 this.setupKeyboardShortcuts();
             },
             methods: {
+                parseOrchestrationData(apiResponse) {
+                    // Why: the backend returns orchestration metadata on every successful /api/process response.
+                    // This function normalizes it into a stable UI shape so the template can remain simple
+                    // (and so future backend changes can be handled in one place).
+                    return {
+                        executionPath: Array.isArray(apiResponse.execution_path) ? apiResponse.execution_path : [],
+                        arbitrationDecisions: Array.isArray(apiResponse.arbitration_decisions) ? apiResponse.arbitration_decisions : [],
+                        synthesisNotes: Array.isArray(apiResponse.synthesis_notes) ? apiResponse.synthesis_notes : []
+                    };
+                },
                 // Dark mode methods
                 toggleDarkMode() {
                     this.darkMode = !this.darkMode;
@@ -647,6 +712,9 @@
                     const currentQuery = this.query;
                     this.query = '';
                     this.isProcessing = true;
+                    // Reset the orchestration panel while a new request is running so users don't see stale data
+                    // from the previous answer.
+                    this.orchestrationData = null;
 
                     try {
                         const response = await fetch(`${this.apiUrl}/api/process`, {
@@ -663,6 +731,8 @@
                         const data = await response.json();
 
                         if (data.success) {
+                            // Bind orchestration data from backend response to the Orchestration panel.
+                            this.orchestrationData = this.parseOrchestrationData(data);
                             this.messages.push({
                                 role: 'assistant',
                                 content: data.content,

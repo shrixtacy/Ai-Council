@@ -9,6 +9,7 @@ for processing user requests.
 
 import logging
 import sys
+import concurrent.futures
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -66,6 +67,11 @@ class AICouncil:
         # Initialize orchestration layer
         self.orchestration_layer: OrchestrationLayer = self.factory.create_orchestration_layer()
         
+        # Initialize executor for handling request timeouts
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.config.execution.max_parallel_executions
+        )
+        
         self.logger.info("AI Council application initialized successfully")
     
     def process_request(
@@ -87,14 +93,33 @@ class AICouncil:
         self.logger.debug(f"User input: {user_input[:200]}...")
         
         try:
-            response = self.orchestration_layer.process_request(user_input, execution_mode)
+            timeout_seconds = self.config.execution.default_timeout_seconds
             
-            if response.success:
-                self.logger.info("Request processed successfully")
-            else:
-                self.logger.warning(f"Request processing failed: {response.error_message}")
+            future = self.executor.submit(
+                self.orchestration_layer.process_request, 
+                user_input, 
+                execution_mode
+            )
             
-            return response
+            try:
+                response = future.result(timeout=timeout_seconds)
+                
+                if response.success:
+                    self.logger.info("Request processed successfully")
+                else:
+                    self.logger.warning(f"Request processing failed: {response.error_message}")
+                
+                return response
+                
+            except concurrent.futures.TimeoutError:
+                self.logger.error(f"Request timed out after {timeout_seconds} seconds")
+                return FinalResponse(
+                    content="",
+                    overall_confidence=0.0,
+                    success=False,
+                    error_message=f"Request timed out after {timeout_seconds} seconds",
+                    models_used=[]
+                )
             
         except ConfigurationError as e:
             self.logger.error(f"Configuration error: {str(e)}")
@@ -302,6 +327,9 @@ class AICouncil:
         # Perform any cleanup operations
         try:
             # Close any open resources
+            if hasattr(self, 'executor'):
+                self.executor.shutdown(wait=False)
+            
             # Note: ResilienceManager doesn't have reset_all_circuit_breakers method
             # Just log successful shutdown
             self.logger.info("AI Council application shutdown complete")

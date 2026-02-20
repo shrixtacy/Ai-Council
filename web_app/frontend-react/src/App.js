@@ -19,8 +19,43 @@ function App() {
   const { isAuthenticated } = useAuthStore();
 
   return (
+        <ErrorBoundary>
+      {/* Toast notification container */}
+      <Toaster
+        position="top-right"
+        containerStyle={{ zIndex: 9999 }}
+        toastOptions={{
+          duration: 3000,
+          style: {
+            background: '#1f2937',
+            color: '#f9fafb',
+            borderRadius: '8px',
+            fontSize: '0.875rem',
+            maxWidth: '360px',
+          },
+          success: {
+            duration: 3000,
+            iconTheme: {
+              primary: '#10b981',
+              secondary: '#fff',
+            },
+          },
+          error: {
+            duration: 4000,
+            iconTheme: {
+              primary: '#ef4444',
+              secondary: '#fff',
+            },
+          },
+          loading: {
+            iconTheme: {
+              primary: '#6366f1',
+              secondary: '#fff',
+            },
+          },
+        }}
+      />
     <Router>
-      <Toaster position="top-right" />
       <Routes>
         {/* Public Routes */}
         <Route 
@@ -43,6 +78,7 @@ function App() {
         <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
       </Routes>
     </Router>
+</ErrorBoundary>
   );
 }
 

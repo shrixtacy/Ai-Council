@@ -140,6 +140,8 @@ async def process_request(request: RequestModel):
             "execution_time": response.execution_metadata.total_execution_time if response.execution_metadata else 0,
             "cost": response.cost_breakdown.total_cost if response.cost_breakdown else 0,
             "execution_path": response.execution_metadata.execution_path if response.execution_metadata else [],
+            "arbitration_decisions": response.execution_metadata.arbitration_decisions if response.execution_metadata else [],
+            "synthesis_notes": response.execution_metadata.synthesis_notes if response.execution_metadata else [],
             "error_message": response.error_message if not response.success else None
         }
     except Exception as e:
@@ -212,6 +214,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 "models_used": response.models_used,
                 "execution_time": response.execution_metadata.total_execution_time if response.execution_metadata else 0,
                 "cost": response.cost_breakdown.total_cost if response.cost_breakdown else 0,
+                "execution_path": response.execution_metadata.execution_path if response.execution_metadata else [],
+                "arbitration_decisions": response.execution_metadata.arbitration_decisions if response.execution_metadata else [],
+                "synthesis_notes": response.execution_metadata.synthesis_notes if response.execution_metadata else [],
                 "error_message": response.error_message if not response.success else None
             })
             
