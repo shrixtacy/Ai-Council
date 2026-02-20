@@ -38,7 +38,7 @@ router.post('/register', [
     const { email, password, name } = req.body;
 
     // Check if user exists
-    let user = await User.findOne({ email });
+    let user = await User.findOne({ email }).exec();
     if (user && user.isVerified) {
       return res.status(400).json({ success: false, message: 'User already exists' });
     }
@@ -92,7 +92,7 @@ router.post('/verify-otp', [
 
     const { userId, otp } = req.body;
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).exec();
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -152,7 +152,7 @@ router.post('/resend-otp', [
   try {
     const { userId } = req.body;
 
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).exec();
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -197,7 +197,7 @@ router.post('/login', [
     const { email, password } = req.body;
 
     // Check user exists
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).exec();
     if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
@@ -253,7 +253,7 @@ router.post('/login', [
 router.post('/logout', protect, async (req, res) => {
   try {
     const token = req.headers.authorization.split(' ')[1];
-    await Session.findOneAndUpdate({ token }, { isActive: false });
+    await Session.findOneAndUpdate({ token }, { isActive: false }).exec();
 
     res.json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
