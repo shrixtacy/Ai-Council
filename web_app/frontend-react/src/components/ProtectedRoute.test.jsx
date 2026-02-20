@@ -1,5 +1,4 @@
 import React from 'react';
-import '@testing-library/jest-dom';
 import { render } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import ProtectedRoute from './ProtectedRoute';
@@ -19,13 +18,13 @@ describe('ProtectedRoute', () => {
   const TestComponent = () => <div>Protected Content</div>;
   const LoginComponent = () => <div>Login Page</div>;
 
-  const renderWithRouter = (isAuthenticated, isVerified = true) => {
+  const renderWithRouter = (isAuthenticated) => {
     useAuthStore.mockImplementation((selector) => {
       const state = {
         isAuthenticated,
-        user: isAuthenticated ? { isVerified } : null,
+        user: isAuthenticated ? {} : null,
       };
-      return selector(state);
+      return selector ? selector(state) : state;
     });
 
     return render(
@@ -45,8 +44,8 @@ describe('ProtectedRoute', () => {
     );
   };
 
-  it('renders children if user is authenticated and verified', () => {
-    const { getByText } = renderWithRouter(true, true);
+  it('renders children if user is authenticated', () => {
+    const { getByText } = renderWithRouter(true);
     expect(getByText('Protected Content')).toBeTruthy();
   });
 

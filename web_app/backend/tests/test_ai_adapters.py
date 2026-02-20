@@ -79,5 +79,4 @@ def test_missing_api_key():
     
     with pytest.raises(ValueError, match="OpenAI API key not configured"):
         import asyncio
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(adapter.generate_async("Test"))
+        asyncio.run(adapter.generate_async("Test"))

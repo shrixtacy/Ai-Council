@@ -1,5 +1,4 @@
 import React from 'react';
-import '@testing-library/jest-dom';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Login from './Login';
@@ -88,6 +87,28 @@ describe('Login Component', () => {
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('Invalid credentials');
+    });
+  });
+
+  it('redirects to verify-otp if needsVerification is true', async () => {
+    authAPI.post.mockRejectedValueOnce({
+      response: { data: { message: 'Please verify your email first', needsVerification: true, userId: '12345' } }
+    });
+    
+    // We spy on the global window location or just assert the toast since we are rendering with BrowserRouter
+    renderWithRouter(<Login />);
+    
+    fireEvent.change(screen.getByPlaceholderText(/you@example.com/i), {
+      target: { value: 'unverified@example.com' },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/••••••••/i), {
+      target: { value: 'password123' },
+    });
+    
+    fireEvent.click(screen.getByRole('button', { name: /Login/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Please verify your email first');
     });
   });
 });

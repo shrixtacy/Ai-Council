@@ -6,8 +6,9 @@ class MockResponse:
         self.models_used = ["gpt-4"]
         
         class MetaData:
-            total_execution_time = 1.2
-            execution_path = []
+            def __init__(self):
+                self.total_execution_time = 1.2
+                self.execution_path = []
             
         class CostData:
             total_cost = 0.05

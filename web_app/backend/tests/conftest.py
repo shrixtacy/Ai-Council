@@ -13,14 +13,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # However, main.py instantiates it inside an async startup_event.
 @pytest.fixture
 def mock_ai_council():
-    with patch("web_app.backend.main.AICouncil") as mock_class:
-        mock_instance = MagicMock()
-        mock_class.return_value = mock_instance
-        
-        # Setup common mock responses
-        mock_instance.get_system_status.return_value = {"status": "operational", "version": "1.0.0"}
-        
-        yield mock_instance
+    patcher = patch("web_app.backend.main.AICouncil")
+    mock_class = patcher.start()
+    mock_instance = MagicMock()
+    mock_class.return_value = mock_instance
+    
+    # Setup common mock responses
+    mock_instance.get_system_status.return_value = {"status": "operational", "version": "1.0.0"}
+    
+    yield mock_instance
+    patcher.stop()
 
 @pytest.fixture
 def test_client(mock_ai_council):
@@ -28,7 +30,8 @@ def test_client(mock_ai_council):
     import asyncio
     
     # Run the startup event manually in the test environment
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(startup_event())
     
     with TestClient(app) as client:
