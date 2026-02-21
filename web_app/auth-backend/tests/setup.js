@@ -9,7 +9,7 @@ let mongod;
 module.exports.connect = async () => {
   mongod = await MongoMemoryServer.create();
   const uri = mongod.getUri();
-  
+
   // Set the environment variable for server.js to use
   process.env.MONGODB_URI = uri;
 
@@ -17,10 +17,8 @@ module.exports.connect = async () => {
     await mongoose.disconnect();
   }
 
-  await mongoose.connect(uri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  });
+  // Connect without deprecated options (useNewUrlParser and useUnifiedTopology are no longer needed in Mongoose 6+)
+  await mongoose.connect(uri);
 };
 
 /**

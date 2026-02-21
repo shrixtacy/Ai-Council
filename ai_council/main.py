@@ -104,9 +104,18 @@ class AICouncil:
             return response
             
         except concurrent.futures.TimeoutError:
+            # Cancel the future to stop the runaway task
+            future.cancel()
             self.logger.error(f"Request timed out after {timeout_seconds} seconds")
             return create_error_response(
                 Exception(f"Request timed out after {timeout_seconds} seconds"),
+                context={'component': 'main.process_request', 'execution_time': timeout_seconds}
+            )
+        except Exception as e:
+            # Catch non-timeout exceptions and return error response
+            self.logger.error(f"Request processing failed: {str(e)}")
+            return create_error_response(
+                e,
                 context={'component': 'main.process_request'}
             )
     

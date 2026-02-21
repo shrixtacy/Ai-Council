@@ -9,6 +9,9 @@ class MockResponse:
             def __init__(self):
                 self.total_execution_time = 1.2
                 self.execution_path = []
+                # Add missing fields that the serializer expects
+                self.arbitration_decisions = []
+                self.synthesis_notes = ""
             
         class CostData:
             total_cost = 0.05

@@ -243,6 +243,11 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         Returns:
             Optional[str]: Action to take ('continue', 'degraded', 'fail')
         """
+        # Guard: Handle empty agent_responses to avoid division by zero
+        if not agent_responses:
+            logger.debug("No agent responses to check for partial failure")
+            return "continue"
+        
         success_rate = sum(1 for resp in agent_responses if resp.success) / len(agent_responses)
         
         if success_rate < self.partial_failure_threshold:
@@ -310,6 +315,16 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             return self._synthesize_with_protection(validated_responses)
         except Exception as e:
             logger.error(f"Synthesis failed: {str(e)}")
+            # Guard: Handle empty validated_responses to avoid IndexError
+            if not validated_responses:
+                logger.warning("No validated responses available for synthesis fallback")
+                return FinalResponse(
+                    content="",
+                    overall_confidence=0.5,
+                    models_used=[],
+                    success=False,
+                    error_message="No responses available for synthesis"
+                )
             # Fallback: return first validated response as final response
             first_response = validated_responses[0]
             return FinalResponse(

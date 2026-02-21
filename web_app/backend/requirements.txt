@@ -6,12 +6,12 @@ pydantic>=2.0.0
 python-dotenv>=1.0.0
 httpx>=0.24.0
 # Logging
-structlog>=23.0.0
+structlog>=25.5.0
 
 # Testing
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
+pytest>=8.0,<9
+pytest-asyncio>=1.0,<2
+pytest-cov>=7.0,<8
 
 # Local package
 -e ../..

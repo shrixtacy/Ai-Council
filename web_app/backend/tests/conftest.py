@@ -32,7 +32,10 @@ def test_client(mock_ai_council):
     # Run the startup event manually in the test environment
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(startup_event())
+    try:
+        loop.run_until_complete(startup_event())
+    finally:
+        loop.close()
     
     with TestClient(app) as client:
         yield client

@@ -106,6 +106,10 @@ class ErrorResponseFactory:
         getattr(logger, log_level)(log_message)
         
         # Create and return the error response
+        # Fix: Explicitly check for execution_time presence using 'is not None'
+        exec_time = context.get('execution_time')
+        cost_breakdown = CostBreakdown(execution_time=exec_time) if exec_time is not None else None
+        
         return FinalResponse(
             content="",
             overall_confidence=0.0,
@@ -113,9 +117,7 @@ class ErrorResponseFactory:
             error_message=str(exception),
             error_type=error_type,
             models_used=context.get('models_used', []),
-            cost_breakdown=CostBreakdown(
-                execution_time=context.get('execution_time', 0.0)
-            ) if context.get('execution_time') else None
+            cost_breakdown=cost_breakdown
         )
     
     def _get_error_type(self, exception: Exception) -> str:
