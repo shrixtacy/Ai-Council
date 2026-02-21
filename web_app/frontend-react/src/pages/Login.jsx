@@ -57,13 +57,13 @@ const Login = () => {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-full mb-4">
             <Brain className="w-8 h-8 text-primary-600" />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">AI Council</h1>
-          <p className="text-white/80">Multi-Agent Orchestration System</p>
+          <h1 className="text-3xl font-bold font-display tracking-tight text-white mb-2">AI Council</h1>
+          <p className="text-white/80 font-sans">Multi-Agent Orchestration System</p>
         </div>
 
         {/* Login Form */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">Welcome Back</h2>
+          <h2 className="text-2xl font-bold font-display tracking-tight text-gray-800 mb-6">Welcome Back</h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
@@ -108,7 +108,7 @@ const Login = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-primary-600 to-primary-700 text-white py-3 rounded-lg font-semibold hover:from-primary-700 hover:to-primary-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full font-display bg-gradient-to-r from-primary-600 to-primary-700 text-white py-3 rounded-lg font-semibold hover:from-primary-700 hover:to-primary-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>

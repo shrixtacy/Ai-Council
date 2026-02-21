@@ -72,7 +72,7 @@ const Chat = () => {
           >
             <ArrowLeft className="w-6 h-6" />
           </button>
-          <h1 className="text-2xl font-bold text-gray-800">AI Chat</h1>
+          <h1 className="text-2xl font-bold font-display tracking-tight text-gray-800">AI Chat</h1>
         </div>
 
         {/* Orchestration Visualizer */}
@@ -85,7 +85,7 @@ const Chat = () => {
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 min-h-[400px] max-h-[500px] overflow-y-auto">
           {messages.length === 0 ? (
             <div className="text-center text-gray-500 mt-20">
-              <p className="text-lg">Start a conversation with AI Council</p>
+              <p className="text-lg font-display tracking-tight">Start a conversation with AI Council</p>
               <p className="text-sm mt-2">Ask anything and watch the orchestration in action!</p>
             </div>
           ) : (
@@ -137,7 +137,7 @@ const Chat = () => {
             <button
               type="submit"
               disabled={loading || !query.trim()}
-              className="px-6 py-3 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-lg font-semibold hover:from-primary-700 hover:to-primary-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="px-6 py-3 font-display bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-lg font-semibold hover:from-primary-700 hover:to-primary-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               <Send className="w-5 h-5" />
               Send
