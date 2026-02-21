@@ -17,7 +17,7 @@ module.exports.connect = async () => {
     await mongoose.disconnect();
   }
 
-  // Connect without deprecated options (useNewUrlParser and useUnifiedTopology are no longer needed in Mongoose 6+)
+  // Mongoose 6+ does NOT need deprecated options
   await mongoose.connect(uri);
 };
 

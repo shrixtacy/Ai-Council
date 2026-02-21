@@ -1,4 +1,5 @@
 import React from 'react';
+import '@testing-library/jest-dom';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Register from './Register';
@@ -91,7 +92,6 @@ describe('Register Component', () => {
   });
 
   it('shows error when API call fails', async () => {
-    // Mock the API to reject with an axios-like error
     authAPI.post.mockRejectedValueOnce({
       response: {
         data: {
