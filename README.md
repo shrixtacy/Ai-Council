@@ -438,6 +438,19 @@ See our detailed [Contributing Guide](./CONTRIBUTING.md) for more information.
 
 MIT License - see [LICENSE](./LICENSE) file for details.
 
+
+---
+
+## Contributors ✨
+
+This project exists thanks to the amazing people who contribute their time, ideas, and improvements.
+
+We truly appreciate every contribution 💙
+
+<a href="https://github.com/shrixtacy/Ai-Council/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=shrixtacy/Ai-Council" />
+</a>
+
 ## 🙏 Acknowledgments
 
 Built with modern Python best practices and inspired by the need for intelligent AI orchestration in production environments.
