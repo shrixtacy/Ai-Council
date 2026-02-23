@@ -2,6 +2,8 @@
 FastAPI backend for AI Council web interface.
 """
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
@@ -61,6 +63,70 @@ class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
         return response
 
 app = FastAPI(title="AI Council API", version="1.0.0")
+from ai_council.main import AICouncil
+from ai_council.core.models import ExecutionMode
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize AI Council on startup."""
+    try:
+        import os
+
+        # Set config path
+        config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
+        if config_path.exists():
+            os.environ['AI_COUNCIL_CONFIG'] = str(config_path)
+        
+        ai_council_instance = AICouncil(config_path if config_path.exists() else None)
+        app.state.ai_council = ai_council_instance
+        print("[OK] AI Council initialized successfully")
+        yield
+    except RuntimeError as e:
+        # Handle configuration validation errors gracefully without stack trace
+        if "Configuration validation failed" in str(e):
+            print("\n" + "="*60)
+            print("[CRITICAL] STARTUP FAILED DUE TO CONFIGURATION ERRORS")
+            print("="*60)
+            print(str(e).replace("Configuration validation failed:", "").strip())
+            print("="*60 + "\n")
+            import sys
+            sys.exit(1)
+        
+        # Fall through for other RuntimeErrors
+        print(f"[ERROR] Failed to initialize AI Council: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
+    except Exception as e:
+        print(f"[ERROR] Failed to initialize AI Council: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+app = FastAPI(title="AI Council API", version="1.0.0", lifespan=lifespan)
+
+# Load environment variables
+import os
+from dotenv import load_dotenv
+
+env_path = Path(__file__).parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+else:
+    load_dotenv()
+
+# CORS configuration
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_str:
+    allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+else:
+    # Default to localhost/local IPs for development
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000"
+    ]
 
 # Add rate limiting middleware
 app.add_middleware(SlowAPIMiddleware)
@@ -105,48 +171,23 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Global AI Council instance
-ai_council = None
-
+def get_ai_council(request: Request) -> AICouncil:
+    """Dependency to get AI Council instance."""
+    return request.app.state.ai_council
 
 class RequestModel(BaseModel):
     query: str
     mode: str = "balanced"
 
-
 class EstimateModel(BaseModel):
     query: str
     mode: str = "balanced"
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize AI Council on startup."""
-    global ai_council
-    try:
-        # Load environment variables
-        from dotenv import load_dotenv
-        load_dotenv()
-        
-        # Set config path
-        import os
-        config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
-        if config_path.exists():
-            os.environ['AI_COUNCIL_CONFIG'] = str(config_path)
-        
-        ai_council = AICouncil(config_path if config_path.exists() else None)
-        print("✓ AI Council initialized successfully")
-    except Exception as e:
-        print(f"✗ Failed to initialize AI Council: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise
 
 
 @app.get("/")
@@ -160,22 +201,8 @@ async def root():
 
 
 @app.get("/api/status")
-@limiter.limit("100/15minutes")
-async def get_status(request: Request):
-    """Get system status.
-    
-    Rate limited to 100 requests per 15 minutes per IP address.
-    Returns current AI Council system status including health and metrics.
-    
-    Args:
-        request: FastAPI request object (used for rate limiting)
-        
-    Returns:
-        System status information
-        
-    Raises:
-        HTTPException: If status retrieval fails
-    """
+async def get_status(ai_council: AICouncil = Depends(get_ai_council)):
+    """Get system status."""
     try:
         status = ai_council.get_system_status()
         return status
@@ -201,6 +228,8 @@ async def process_request(request: Request, req: RequestModel):
     Raises:
         HTTPException: If processing fails
     """
+async def process_request(request: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
+    """Process a user request."""
     try:
         # Map mode string to ExecutionMode
         mode_map = {
@@ -213,6 +242,7 @@ async def process_request(request: Request, req: RequestModel):
         
         # Process the request
         response = ai_council.process_request(req.query, mode)
+        response = await ai_council.process_request(request.query, mode)
         
         return {
             "success": response.success,
@@ -248,6 +278,8 @@ async def estimate_cost(request: Request, req: EstimateModel):
     Raises:
         HTTPException: If estimation fails
     """
+async def estimate_cost(request: EstimateModel, ai_council: AICouncil = Depends(get_ai_council)):
+    """Estimate cost and time for a request."""
     try:
         mode_map = {
             "fast": ExecutionMode.FAST,
@@ -264,25 +296,10 @@ async def estimate_cost(request: Request, req: EstimateModel):
 
 
 @app.post("/api/analyze")
-@limiter.limit("100/15minutes")
-async def analyze_tradeoffs(request: Request, req: RequestModel):
-    """Analyze cost-quality trade-offs.
-    
-    Rate limited to 100 requests per 15 minutes per IP address.
-    Analyzes different execution modes and their trade-offs.
-    
-    Args:
-        request: FastAPI request object (used for rate limiting)
-        req: RequestModel containing query and execution mode
-        
-    Returns:
-        Trade-off analysis information
-        
-    Raises:
-        HTTPException: If analysis fails
-    """
+async def analyze_tradeoffs(request: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
+    """Analyze cost-quality trade-offs."""
     try:
-        analysis = ai_council.analyze_tradeoffs(req.query)
+        analysis = await ai_council.analyze_tradeoffs(request.query)
         return analysis
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -305,6 +322,7 @@ async def websocket_endpoint(websocket: WebSocket):
         4. Return final result
     """
     await websocket.accept()
+    ai_council: AICouncil = websocket.app.state.ai_council
     
     try:
         while True:
@@ -328,7 +346,7 @@ async def websocket_endpoint(websocket: WebSocket):
             }
             
             execution_mode = mode_map.get(mode.lower(), ExecutionMode.BALANCED)
-            response = ai_council.process_request(query, execution_mode)
+            response = await ai_council.process_request(query, execution_mode)
             
             # Send result
             await websocket.send_json({

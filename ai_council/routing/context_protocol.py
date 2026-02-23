@@ -32,7 +32,7 @@ class ModelContextProtocolImpl(ModelContextProtocol):
         self._routing_cache: Dict[str, RoutingDecision] = {}
         self._fallback_chains: Dict[str, List[str]] = {}
     
-    def route_task(self, subtask: Subtask) -> ModelSelection:
+    async def route_task(self, subtask: Subtask) -> ModelSelection:
         """Route a subtask to the most appropriate model.
         
         Args:
@@ -99,7 +99,7 @@ class ModelContextProtocolImpl(ModelContextProtocol):
             reasoning=decision.reasoning
         )
     
-    def select_fallback(self, failed_model: str, subtask: Subtask) -> ModelSelection:
+    async def select_fallback(self, failed_model: str, subtask: Subtask) -> ModelSelection:
         """Select a fallback model when the primary model fails.
         
         Args:
@@ -151,7 +151,7 @@ class ModelContextProtocolImpl(ModelContextProtocol):
             reasoning=f"Fallback selection after {failed_model} failed, chose based on score {best_score:.2f}"
         )
     
-    def determine_parallelism(self, subtasks: List[Subtask]) -> ExecutionPlan:
+    async def determine_parallelism(self, subtasks: List[Subtask]) -> ExecutionPlan:
         """Determine which subtasks can be executed in parallel.
         
         Args:

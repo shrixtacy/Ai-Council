@@ -18,9 +18,9 @@ class OpenAIAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using OpenAI API."""
@@ -52,12 +52,7 @@ class OpenAIAdapter(AIModel):
     def generate(self, prompt: str, **kwargs) -> str:
         """Synchronous generate (calls async version)."""
         import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self.generate_async(prompt, **kwargs))
+        return asyncio.run(self.generate_async(prompt, **kwargs))
 
 
 class AnthropicAdapter(AIModel):
@@ -71,9 +66,9 @@ class AnthropicAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using Anthropic API."""
@@ -105,12 +100,7 @@ class AnthropicAdapter(AIModel):
     def generate(self, prompt: str, **kwargs) -> str:
         """Synchronous generate."""
         import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self.generate_async(prompt, **kwargs))
+        return asyncio.run(self.generate_async(prompt, **kwargs))
 
 
 class GoogleGeminiAdapter(AIModel):
@@ -123,9 +113,9 @@ class GoogleGeminiAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using Google Gemini API."""
@@ -155,12 +145,7 @@ class GoogleGeminiAdapter(AIModel):
     def generate(self, prompt: str, **kwargs) -> str:
         """Synchronous generate."""
         import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self.generate_async(prompt, **kwargs))
+        return asyncio.run(self.generate_async(prompt, **kwargs))
 
 
 class GroqAdapter(AIModel):
@@ -174,9 +159,9 @@ class GroqAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using Groq API."""
@@ -208,12 +193,7 @@ class GroqAdapter(AIModel):
     def generate(self, prompt: str, **kwargs) -> str:
         """Synchronous generate."""
         import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self.generate_async(prompt, **kwargs))
+        return asyncio.run(self.generate_async(prompt, **kwargs))
 
 
 class MistralAdapter(AIModel):
@@ -227,9 +207,9 @@ class MistralAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using Mistral API."""
@@ -261,12 +241,7 @@ class MistralAdapter(AIModel):
     def generate(self, prompt: str, **kwargs) -> str:
         """Synchronous generate."""
         import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self.generate_async(prompt, **kwargs))
+        return asyncio.run(self.generate_async(prompt, **kwargs))
 
 
 class XAIAdapter(AIModel):
@@ -280,9 +255,9 @@ class XAIAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using xAI API."""
@@ -314,12 +289,7 @@ class XAIAdapter(AIModel):
     def generate(self, prompt: str, **kwargs) -> str:
         """Synchronous generate."""
         import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self.generate_async(prompt, **kwargs))
+        return asyncio.run(self.generate_async(prompt, **kwargs))
 
 
 def create_model_adapter(provider: str, model_id: str, api_key: Optional[str] = None) -> AIModel:

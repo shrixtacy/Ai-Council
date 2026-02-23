@@ -533,9 +533,9 @@ MAINTENANCE NOTES:
                                               rows="2"></textarea>
                                     <!-- Accessibility: Has dynamic title and static aria-label for screen reader support -->
                                     <button @click="processQuery" 
-                                            :disabled="isProcessing || !query.trim() || rateLimit.isLimited"
-                                            :title="rateLimit.isLimited ? 'Rate limit exceeded' : 'Send message'"
+                                            :disabled="isProcessing || !query.trim()"
                                             aria-label="Send message"
+                                            title="Send message"
                                             class="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed shadow-md">
                                         <i class="fas fa-paper-plane text-lg"></i>
                                     </button>

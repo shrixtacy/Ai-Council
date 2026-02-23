@@ -35,7 +35,7 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         self.quality_weight = quality_weight
         logger.info(f"ArbitrationLayer initialized with confidence_threshold={confidence_threshold}, quality_weight={quality_weight}")
     
-    def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
+    async def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
         """
         Arbitrate between multiple agent responses to resolve conflicts.
         
@@ -62,14 +62,14 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         logger.info(f"Starting arbitration for {len(responses)} responses")
         
         # Step 1: Detect conflicts between responses
-        conflicts = self.detect_conflicts(responses)
+        conflicts = await self.detect_conflicts(responses)
         logger.info(f"Detected {len(conflicts)} conflicts")
         
         # Step 2: Resolve each conflict
         resolutions = []
         for conflict in conflicts:
             try:
-                resolution = self.resolve_contradiction(conflict)
+                resolution = await self.resolve_contradiction(conflict)
                 resolutions.append(resolution)
                 logger.info(f"Resolved conflict: {conflict.conflict_type}")
             except Exception as e:
@@ -81,7 +81,7 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         logger.info(f"Arbitration complete: {len(validated_responses)} validated responses, {len(resolutions)} conflicts resolved")
         return ArbitrationResult(validated_responses=validated_responses, conflicts_resolved=resolutions)
     
-    def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
+    async def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
         """
         Detect conflicts between multiple agent responses.
         
@@ -107,7 +107,7 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         
         return conflicts
     
-    def resolve_contradiction(self, conflict: Conflict) -> Resolution:
+    async def resolve_contradiction(self, conflict: Conflict) -> Resolution:
         """
         Resolve a specific contradiction between responses.
         
@@ -118,11 +118,11 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
             Resolution: The resolution decision
         """
         if conflict.conflict_type == "content_contradiction":
-            return self._resolve_content_contradiction(conflict)
+            return await self._resolve_content_contradiction(conflict)
         elif conflict.conflict_type == "confidence_conflict":
-            return self._resolve_confidence_conflict(conflict)
+            return await self._resolve_confidence_conflict(conflict)
         elif conflict.conflict_type == "quality_conflict":
-            return self._resolve_quality_conflict(conflict)
+            return await self._resolve_quality_conflict(conflict)
         else:
             # Default resolution: choose first response with warning
             logger.warning(f"Unknown conflict type: {conflict.conflict_type}, defaulting to first response")
@@ -243,7 +243,7 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         
         return conflicts
     
-    def _resolve_content_contradiction(self, conflict: Conflict) -> Resolution:
+    async def _resolve_content_contradiction(self, conflict: Conflict) -> Resolution:
         """Resolve content contradictions by choosing the most reliable response."""
         # For content contradictions, prioritize responses with higher confidence and better quality
         # This is a simplified resolution - in practice, might involve more sophisticated analysis
@@ -255,7 +255,7 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
             confidence=0.7
         )
     
-    def _resolve_confidence_conflict(self, conflict: Conflict) -> Resolution:
+    async def _resolve_confidence_conflict(self, conflict: Conflict) -> Resolution:
         """Resolve confidence conflicts by choosing the most confident response."""
         reasoning = f"Resolved confidence conflict by selecting response with highest confidence score"
         return Resolution(
@@ -264,7 +264,7 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
             confidence=0.8
         )
     
-    def _resolve_quality_conflict(self, conflict: Conflict) -> Resolution:
+    async def _resolve_quality_conflict(self, conflict: Conflict) -> Resolution:
         """Resolve quality conflicts by choosing the highest quality response."""
         reasoning = f"Resolved quality conflict by selecting response with highest quality score"
         return Resolution(
@@ -365,7 +365,7 @@ class NoOpArbitrationLayer(ArbitrationLayer):
         """Initialize the no-op arbitration layer."""
         logger.info("NoOpArbitrationLayer initialized - arbitration disabled")
     
-    def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
+    async def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
         """
         Pass through all successful responses without arbitration.
         
@@ -383,7 +383,7 @@ class NoOpArbitrationLayer(ArbitrationLayer):
             conflicts_resolved=[]
         )
     
-    def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
+    async def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
         """
         Return empty list - no conflict detection in no-op mode.
         
@@ -395,7 +395,7 @@ class NoOpArbitrationLayer(ArbitrationLayer):
         """
         return []
     
-    def resolve_contradiction(self, conflict: Conflict) -> Resolution:
+    async def resolve_contradiction(self, conflict: Conflict) -> Resolution:
         """
         Return default resolution - should not be called in no-op mode.
         

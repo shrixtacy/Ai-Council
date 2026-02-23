@@ -1,0 +1,151 @@
+name: Issue Auto-Assignment
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+
+jobs:
+  auto-assign-creator:
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-assign issue to creator
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const creator = issue.user.login;
+            const issueNumber = issue.number;
+            const repoOwner = context.repo.owner;
+            
+            // Only auto-assign if creator is NOT the repo owner
+            // If owner creates an issue, wait for someone to comment "assign me"
+            if (creator.toLowerCase() === repoOwner.toLowerCase()) {
+              console.log(`Issue #${issueNumber} created by repo owner @${creator} - skipping auto-assignment`);
+              console.log(`Waiting for someone to comment with assignment keywords...`);
+              return;
+            }
+            
+            // Check if creator already has an open issue assigned
+            const { data: allIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              assignee: creator
+            });
+            
+            if (allIssues.length > 0) {
+              const assignedIssues = allIssues.map(i => `#${i.number}`).join(', ');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `⚠️ **Cannot Auto-Assign**\n\nHey @${creator}! You're already assigned to: ${assignedIssues}\n\nPlease complete your current issue(s) before creating new ones. Contributors can only work on one issue at a time.\n\n💡 **Tip:** Once you submit a PR and close your current issue, you can create/request new issues! 🚀`
+              });
+              return;
+            }
+            
+            // Assign the issue to the creator
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              assignees: [creator]
+            });
+            
+            // Add a comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `🎯 **Issue Auto-Assigned!**\n\nHey @${creator}! This issue has been automatically assigned to you.\n\n✨ **Next Steps:**\n- Review the issue details carefully\n- Check CONTRIBUTING.md for guidelines\n- Start working on a solution\n- Create a PR when ready and link it to this issue\n\n⚠️ **Note:** You can only work on one issue at a time. Please complete this before creating another.\n\nHappy coding! 🚀`
+            });
+            
+            console.log(`Issue #${issueNumber} assigned to @${creator}`);
+
+  assign-on-comment:
+    if: github.event_name == 'issue_comment' && github.event.action == 'created'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if repo owner created the issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const comment = context.payload.comment;
+            const issueCreator = issue.user.login;
+            const commenter = comment.user.login;
+            const issueNumber = issue.number;
+            
+            // Get repository owner
+            const repoOwner = context.repo.owner;
+            
+            // Check if issue was created by repo owner
+            const isOwnerIssue = issueCreator.toLowerCase() === repoOwner.toLowerCase();
+            
+            // Check if comment contains assignment-related words (very flexible)
+            const commentBody = comment.body.toLowerCase();
+            const assignmentWords = ['assign', 'contribute', 'work', 'take', 'interested', 'help'];
+            const wantsAssignment = assignmentWords.some(word => commentBody.includes(word));
+            
+            console.log(`Issue creator: ${issueCreator}, Repo owner: ${repoOwner}, Is owner issue: ${isOwnerIssue}`);
+            console.log(`Commenter: ${commenter}, Comment contains assignment words: ${wantsAssignment}`);
+            console.log(`Comment body: "${commentBody.substring(0, 100)}..."`);
+            
+            // If owner created the issue and someone (not owner) comments with assignment intent, assign them
+            if (isOwnerIssue && wantsAssignment && commenter !== issueCreator) {
+              // Check if issue is already assigned
+              const currentAssignees = issue.assignees.map(a => a.login);
+              
+              if (currentAssignees.length > 0) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: `⚠️ **Already Assigned**\n\nHey @${commenter}! This issue is already assigned to: ${currentAssignees.map(a => `@${a}`).join(', ')}\n\nPlease check other open issues or wait for this one to become available. 🙏`
+                });
+                return;
+              }
+              
+              // Check if commenter already has an open issue assigned
+              const { data: allIssues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                assignee: commenter
+              });
+              
+              if (allIssues.length > 0) {
+                const assignedIssues = allIssues.map(i => `#${i.number}`).join(', ');
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: `⚠️ **Already Working on Another Issue**\n\nHey @${commenter}! You're already assigned to: ${assignedIssues}\n\nPlease complete your current issue(s) before taking on new ones. Contributors can only work on one issue at a time to ensure quality and fair distribution of work.\n\n💡 **Tip:** Once you submit a PR and close your current issue, you'll be able to take on new issues! 🚀`
+                });
+                return;
+              }
+              
+              // Assign to the commenter
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                assignees: [commenter]
+              });
+              
+              // Add confirmation comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `🎉 **Issue Assigned!**\n\nCongratulations @${commenter}! This issue has been assigned to you.\n\n📋 **Guidelines:**\n- Read the issue description carefully\n- Review CONTRIBUTING.md and CODE_OF_CONDUCT.md\n- Ask questions if anything is unclear\n- Link your PR to this issue when ready\n- Follow the project's coding standards\n\n⚠️ **Note:** You can only work on one issue at a time. Please complete this before requesting another assignment.\n\nGood luck! 💪`
+              });
+              
+              console.log(`Issue #${issueNumber} assigned to @${commenter}`);
+            }

@@ -2,6 +2,7 @@
 
 import time
 import logging
+import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -51,7 +52,7 @@ class BaseExecutionAgent(ExecutionAgent):
         rate_limit_manager.set_rate_limit("anthropic", 50)  # 50 requests per minute
         rate_limit_manager.set_rate_limit("default", 30)  # Default rate limit
     
-    def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
+    async def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
         """Execute a subtask using the specified AI model with comprehensive failure handling.
         
         Args:
@@ -91,13 +92,16 @@ class BaseExecutionAgent(ExecutionAgent):
                 
                 # Apply rate limiting
                 provider = self._get_model_provider(model_id)
-                allowed, wait_time = rate_limit_manager.check_rate_limit(provider)
-                if not allowed:
-                    logger.info(f"Rate limit hit for {provider}, waiting {wait_time:.1f}s")
-                    time.sleep(wait_time)
+                while True:
+                    allowed, wait_time = rate_limit_manager.check_rate_limit(provider)
+                    if not allowed:
+                        logger.info(f"Rate limit hit for {provider}, waiting {wait_time:.1f}s")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        break
                 
                 # Execute with circuit breaker and timeout
-                response_content = self._execute_with_protection(subtask, model)
+                response_content = await self._execute_with_protection(subtask, model)
                 
                 # Generate self-assessment
                 self_assessment = self.generate_self_assessment(response_content, subtask)
@@ -145,7 +149,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 if not recovery_action.should_retry or attempt >= self.max_retries:
                     if recovery_action.fallback_model:
                         # Try fallback model
-                        return self._execute_with_fallback(
+                        return await self._execute_with_fallback(
                             subtask, recovery_action.fallback_model, start_time
                         )
                     elif recovery_action.skip_subtask:
@@ -161,19 +165,19 @@ class BaseExecutionAgent(ExecutionAgent):
                     jitter = random.uniform(0.8, 1.2)  # ±20% jitter
                     delay = recovery_action.retry_delay * jitter
                     logger.info(f"Waiting {delay:.1f}s before retry")
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
         
         # All attempts failed, return failure response
         return self._create_failure_response(subtask, model_id, str(last_error), start_time)
     
-    def _execute_with_protection(self, subtask: Subtask, model: AIModel) -> str:
+    async def _execute_with_protection(self, subtask: Subtask, model: AIModel) -> str:
         """Execute model call with circuit breaker and timeout protection."""
-        def protected_call():
+        async def protected_call():
             # Get adaptive timeout
             timeout_seconds = adaptive_timeout_manager.get_adaptive_timeout("model_execution")
             
             # Execute with timeout
-            return timeout_handler.execute_with_timeout(
+            return await timeout_handler.execute_with_timeout(
                 self._call_model,
                 timeout_seconds,
                 "model_execution",
@@ -185,11 +189,11 @@ class BaseExecutionAgent(ExecutionAgent):
             )
         
         # Execute through circuit breaker
-        return self.api_circuit_breaker.call(protected_call)
+        return await self.api_circuit_breaker.async_call(protected_call)
     
-    def _call_model(self, subtask: Subtask, model: AIModel) -> str:
+    async def _call_model(self, subtask: Subtask, model: AIModel) -> str:
         """Make the actual model API call."""
-        return model.generate_response(
+        return await model.generate_response(
             prompt=self._build_prompt(subtask),
             max_tokens=self._calculate_max_tokens(subtask),
             temperature=self._get_temperature(subtask)
@@ -240,7 +244,7 @@ class BaseExecutionAgent(ExecutionAgent):
             }
         )
     
-    def _execute_with_fallback(
+    async def _execute_with_fallback(
         self, 
         subtask: Subtask, 
         fallback_model_id: str, 
@@ -249,6 +253,12 @@ class BaseExecutionAgent(ExecutionAgent):
         """Execute subtask with fallback model."""
         logger.info(f"Attempting fallback execution with model {fallback_model_id}")
         
+        # TODO: Implement real fallback execution (#113)
+        # We need to resolve the fallback model instance from the ModelRegistry
+        # and dynamically invoke the normal execution path (e.g., self.execute),
+        # instead of returning a hard-coded degraded AgentResponse with 
+        # a default SelfAssessment and RiskLevel.
+
         # This is a simplified implementation - in practice, you'd need to
         # get the actual fallback model instance from a registry
         # For now, return a degraded response

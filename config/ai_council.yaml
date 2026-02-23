@@ -5,7 +5,7 @@ execution:
   max_parallel_executions: 3
   max_retries: 3
   default_timeout_seconds: 60.0
-  enable_arbitration: false  # Disable arbitration to keep all responses
+  enable_arbitration: true  # Arbitration enabled for conflict resolution
   enable_synthesis: true
 
 cost:
@@ -37,8 +37,8 @@ models:
     max_context_length: 131072
     timeout_seconds: 45.0
 
-  # Google Gemini 2.5 Flash - ENABLED (Working!)
-  gemini-2.5-flash:
+  # Google Gemini 1.5 Flash - ENABLED (Working!)
+  gemini-1.5-flash:
     enabled: true
     provider: google
     api_key_env: GOOGLE_API_KEY

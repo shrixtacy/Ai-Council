@@ -17,7 +17,8 @@ jobs:
           script: |
             const issueNumber = context.issue.number;
 
-            const commentBody1 = `### Thank you for raising this issue!\n We'll review it as soon as possible. We truly appreciate your contributions! ✨\n\n> Meanwhile make sure you've visited the README.md, CONTRIBUTING.md, and CODE_OF_CONDUCT.md before creating a PR for this. Also, please do NOT create a PR until this issue has been assigned to you. 😊`;
+            const commentBody1 = `### 🙏 Thank you for raising this issue!\n\nWe'll review it as soon as possible. We truly appreciate your contributions! ✨\n\n📚 **Before you start working:**\n- ✅ Make sure you've read the [README.md](/${context.repo.owner}/${context.repo.repo}/blob/master/README.md)\n- ✅ Review [CONTRIBUTING.md](/${context.repo.owner}/${context.repo.repo}/blob/master/CONTRIBUTING.md) for guidelines\n- ✅ Familiarize yourself with [CODE_OF_CONDUCT.md](/${context.repo.owner}/${context.repo.repo}/blob/master/CODE_OF_CONDUCT.md)\n\n⚠️ **Important:** Please do NOT create a PR until this issue has been assigned to you.\n\n💡 **Want to work on this?** Comment "assign me" or "I want to work on this" to get assigned!`;
+
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -26,4 +27,4 @@ jobs:
               body: commentBody1
             });
 
-            console.log('Both comments added successfully.');
+            console.log('Welcome comment added successfully.');

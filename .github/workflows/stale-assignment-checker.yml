@@ -1,0 +1,132 @@
+name: Stale Assignment Checker
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  check-stale-assignments:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for stale issue assignments
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const now = new Date();
+            
+            // Get all open issues with assignees
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            
+            console.log(`Found ${issues.length} open issues to check`);
+            
+            for (const issue of issues) {
+              // Skip if no assignees
+              if (!issue.assignees || issue.assignees.length === 0) {
+                continue;
+              }
+              
+              // Get issue events to find when it was assigned
+              const { data: events } = await github.rest.issues.listEvents({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number
+              });
+              
+              // Find the most recent assignment event
+              const assignedEvents = events.filter(e => e.event === 'assigned').reverse();
+              if (assignedEvents.length === 0) continue;
+              
+              const lastAssignedEvent = assignedEvents[0];
+              const assignedAt = new Date(lastAssignedEvent.created_at);
+              const hoursSinceAssignment = (now - assignedAt) / (1000 * 60 * 60);
+              
+              console.log(`Issue #${issue.number}: Assigned ${hoursSinceAssignment.toFixed(1)} hours ago`);
+              
+              // Check if there's a linked PR
+              const { data: prs } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'all',
+                per_page: 100
+              });
+              
+              // Check if any PR references this issue
+              const linkedPR = prs.find(pr => {
+                const body = pr.body || '';
+                const title = pr.title || '';
+                const text = `${title} ${body}`.toLowerCase();
+                
+                // Check for issue references: #123, fixes #123, closes #123, etc.
+                const patterns = [
+                  new RegExp(`#${issue.number}\\b`, 'i'),
+                  new RegExp(`\\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+#${issue.number}\\b`, 'i')
+                ];
+                
+                return patterns.some(pattern => pattern.test(text));
+              });
+              
+              const assignee = issue.assignees[0].login;
+              
+              // 24 hour reminder (between 24-30 hours to avoid duplicate reminders)
+              if (hoursSinceAssignment >= 24 && hoursSinceAssignment < 30 && !linkedPR) {
+                console.log(`Sending 24h reminder for issue #${issue.number}`);
+                
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `👋 **Gentle Reminder**\n\nHey @${assignee}! This issue was assigned to you 24 hours ago.\n\n⏰ **Timeline:**\n- ✅ 24 hours: Reminder (now)\n- ⚠️ 48 hours: Auto-unassignment if no PR\n\n📋 **What to do:**\n- Create a PR and link it to this issue (mention #${issue.number} in PR description)\n- If you need more time, comment here to let us know\n- If you can't work on this, let us know so we can reassign\n\n💡 **Tip:** Even a draft PR shows progress and prevents auto-unassignment!\n\nThanks for contributing! 🚀`
+                });
+              }
+              
+              // 48 hour auto-unassignment (between 48-54 hours)
+              if (hoursSinceAssignment >= 48 && hoursSinceAssignment < 54 && !linkedPR) {
+                console.log(`Auto-unassigning issue #${issue.number} - no PR after 48 hours`);
+                
+                // Unassign the contributor
+                await github.rest.issues.removeAssignees({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  assignees: [assignee]
+                });
+                
+                // Add comment explaining the unassignment
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `⚠️ **Auto-Unassigned**\n\nHey @${assignee}, this issue has been unassigned because no PR was linked after 48 hours.\n\n📋 **What happened:**\n- Issue was assigned 48+ hours ago\n- No PR was found that references this issue\n- Auto-unassignment policy triggered\n\n💡 **Want to work on this again?**\n- Comment below to request reassignment\n- Make sure you can commit to working on it promptly\n\n🌟 **For others:**\nThis issue is now available! Comment if you'd like to work on it.\n\nThanks for understanding! 🙏`
+                });
+                
+                // Add "help wanted" label to make it available again
+                try {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    labels: ['help wanted']
+                  });
+                } catch (error) {
+                  console.log(`Could not add label (may not exist): ${error.message}`);
+                }
+              }
+              
+              // Log if PR exists
+              if (linkedPR) {
+                console.log(`Issue #${issue.number} has linked PR #${linkedPR.number} - no action needed`);
+              }
+            }
+            
+            console.log('Stale assignment check completed');

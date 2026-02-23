@@ -15,7 +15,7 @@ class BasicTaskDecomposer(TaskDecomposer):
         self._priority_indicators = self._build_priority_indicators()
         self._risk_indicators = self._build_risk_indicators()
     
-    def decompose(self, task: Task) -> List[Subtask]:
+    async def decompose(self, task: Task) -> List[Subtask]:
         """Decompose a complex task into smaller, atomic subtasks.
         
         Args:
@@ -55,11 +55,11 @@ class BasicTaskDecomposer(TaskDecomposer):
         
         # Assign metadata to all subtasks
         for i, subtask in enumerate(subtasks):
-            subtasks[i] = self.assign_metadata(subtask)
+            subtasks[i] = await self.assign_metadata(subtask)
         
         return subtasks
     
-    def assign_metadata(self, subtask: Subtask) -> Subtask:
+    async def assign_metadata(self, subtask: Subtask) -> Subtask:
         """Assign metadata to a subtask including priority, risk level, etc.
         
         Args:
@@ -86,7 +86,7 @@ class BasicTaskDecomposer(TaskDecomposer):
         
         return subtask
     
-    def validate_decomposition(self, subtasks: List[Subtask]) -> bool:
+    async def validate_decomposition(self, subtasks: List[Subtask]) -> bool:
         """Validate that a decomposition is complete and consistent.
         
         Args:

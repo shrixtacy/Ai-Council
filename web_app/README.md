@@ -1,284 +1,170 @@
 # AI Council Web Application
 
-A modern web interface for the AI Council multi-agent orchestration system with real AI API integration.
+## 🚀 Quick Setup for Contributors
 
-## Features
-
-- 🎨 **Modern UI**: Beautiful, responsive interface built with Vue.js and Tailwind CSS
-- 🤖 **Multi-Model Support**: Connect to OpenAI, Anthropic, Google, Groq, and Mistral APIs
-- ⚡ **Real-time Chat**: Interactive conversation with AI Council
-- 📊 **Cost Analysis**: Real-time cost tracking and trade-off analysis
-- 🎯 **Execution Modes**: Fast, Balanced, and Best Quality modes
-- 📈 **Performance Metrics**: Track confidence, execution time, and model usage
-
-## Quick Start
-
-### 1. Install Backend Dependencies
-
+### 1. Install Dependencies
 ```bash
-cd web_app/backend
-pip install -r requirements.txt
+# Auth Backend
+cd web_app/auth-backend
+npm install
+
+# React Frontend
+cd web_app/frontend-react
+npm install
 ```
 
-### 2. Configure AI APIs
+### 2. Configure Environment
 
-Create a `.env` file in `web_app/backend/`:
+Create `.env` in `web_app/auth-backend/`:
+```env
+# ONLY thing you need to add:
+MONGODB_URI=mongodb+srv://your-username:password@cluster.mongodb.net/
 
-```bash
-# OpenAI
-OPENAI_API_KEY=your_openai_key_here
+# Use this JWT secret (or generate your own):
+JWT_SECRET=ai-council-super-secret-jwt-key-2026-production-grade
 
-# Anthropic
-ANTHROPIC_API_KEY=your_anthropic_key_here
-
-# Google
-GOOGLE_API_KEY=your_google_key_here
-
-# Groq
-GROQ_API_KEY=your_groq_key_here
-
-# Mistral
-MISTRAL_API_KEY=your_mistral_key_here
+# ✅ EMAIL IS 100% CONFIGURED - DON'T ADD ANYTHING!
+# All emails sent from: obstructgamer@gmail.com
+# Email credentials are hardcoded in server.js
 ```
 
-### 3. Enable Models
-
-Edit `config/ai_council.yaml` (copy from `web_app/config/ai_models.yaml`):
-
-```yaml
-models:
-  gpt-4:
-    enabled: true  # Enable the models you want to use
-    provider: openai
-    # ... rest of config
-```
-
-### 4. Start the Backend
-
+### 3. Start Everything
 ```bash
+# Terminal 1: Auth Backend
+cd web_app/auth-backend
+npm start
+
+# Terminal 2: React Frontend
+cd web_app/frontend-react
+npm start
+
+# Terminal 3: AI Backend (Python)
 cd web_app/backend
 python main.py
 ```
 
-The API will be available at `http://localhost:8000`
+### 4. Test
+- Open http://localhost:3000
+- Register with your email
+- Check email for OTP (sent from obstructgamer@gmail.com)
+- Verify and login!
 
-### 5. Open the Frontend
+## ✅ What You Get
 
-Simply open `web_app/frontend/index.html` in your browser, or serve it:
+- Full authentication with email OTP
+- MongoDB auto-sync (no migrations needed)
+- Real-time chat with AI orchestration
+- Live orchestration visualization
+- Analytics dashboard
+- Chat history
 
+## 📧 Email System
+
+**Fully configured and hardcoded!**
+- All OTP emails sent from: obstructgamer@gmail.com
+- Email credentials hardcoded in `auth-backend/server.js`
+- Contributors need ZERO email configuration
+- No EMAIL_PASSWORD needed in .env
+
+## 🗄️ MongoDB
+
+**Auto-sync like Supabase!**
+- Collections created automatically on first use
+- No migration scripts needed
+- Just add your MongoDB URI and it works
+
+### Collections Created:
+- `users` - User accounts with email verification
+- `sessions` - Active sessions (7-day auto-expire)
+- `chathistories` - Conversations with orchestration data
+
+## 🏗️ Architecture
+
+```
+React Frontend (3000)
+    ↓
+Auth Backend (5000) ← Email: obstructgamer@gmail.com
+    ↓
+MongoDB Atlas ← Auto-Sync
+    ↓
+AI Backend (8000)
+```
+
+## 🔧 Configuration
+
+### Required:
+- `MONGODB_URI` - Your MongoDB connection string
+
+### Already Configured:
+- Email (hardcoded in server.js)
+- JWT secret (example provided)
+- All ports and URLs
+
+## 🐛 Troubleshooting
+
+**MongoDB connection fails:**
+- Check your connection string
+- Whitelist your IP in MongoDB Atlas
+
+**Port already in use:**
 ```bash
-cd web_app/frontend
-python -m http.server 3000
+# Change port in .env
+PORT=5001
 ```
 
-Then visit `http://localhost:3000`
+**Email not sending:**
+- Should work automatically (hardcoded)
+- Check server.js if issues persist
 
-## API Endpoints
+## 📚 API Endpoints
 
-### GET `/api/status`
-Get system status and available models
+### Authentication
+- `POST /api/auth/register` - Register with OTP
+- `POST /api/auth/verify-otp` - Verify email
+- `POST /api/auth/login` - Login
+- `GET /api/auth/me` - Get current user
 
-### POST `/api/process`
-Process a user request
-```json
-{
-  "query": "Your question here",
-  "mode": "balanced"  // fast, balanced, or best_quality
-}
-```
+### Chat
+- `POST /api/chat/save` - Save conversation
+- `GET /api/chat/history` - Get history
+- `GET /api/chat/analytics` - Get analytics
 
-### POST `/api/estimate`
-Estimate cost and time
-```json
-{
-  "query": "Your question here",
-  "mode": "balanced"
-}
-```
+## 🎯 Features
 
-### POST `/api/analyze`
-Analyze cost-quality trade-offs
-```json
-{
-  "query": "Your question here"
-}
-```
-
-### WebSocket `/ws`
-Real-time communication for streaming responses
-
-## Supported AI Providers
-
-### OpenAI
-- GPT-4
-- GPT-3.5 Turbo
-- **Cost**: $0.03/1K tokens (GPT-4), $0.002/1K tokens (GPT-3.5)
-- **Get API Key**: https://platform.openai.com/api-keys
-
-### Anthropic
-- Claude 3 Opus
-- Claude 3 Sonnet
-- **Cost**: $0.015/1K tokens (Opus), $0.003/1K tokens (Sonnet)
-- **Get API Key**: https://console.anthropic.com/
-
-### Google
-- Gemini Pro
-- **Cost**: $0.00125/1K tokens
-- **Get API Key**: https://makersuite.google.com/app/apikey
-
-### Groq
-- Llama 3 70B
-- Mixtral 8x7B
-- **Cost**: $0.0006/1K tokens (very fast inference)
-- **Get API Key**: https://console.groq.com/
-
-### Mistral
-- Mistral Large
-- Mistral Medium
-- **Cost**: $0.004/1K tokens
-- **Get API Key**: https://console.mistral.ai/
-
-## Configuration
-
-### Execution Modes
-
-**Fast Mode**
-- Optimized for speed
-- Uses faster, cheaper models
-- Lower quality threshold
-- Best for: Quick queries, simple tasks
-
-**Balanced Mode** (Default)
-- Balance of speed and quality
-- Standard cost and time
-- Good for: Most use cases
-
-**Best Quality Mode**
-- Maximum quality
-- Uses premium models
-- Higher cost and time
-- Best for: Complex reasoning, critical tasks
-
-### Cost Limits
-
-Set maximum cost per request in `config/ai_council.yaml`:
-
-```yaml
-cost:
-  max_cost_per_request: 1.0  # Maximum $1 per request
-  currency: USD
-  enable_cost_tracking: true
-```
-
-## Architecture
-
-```
-Frontend (Vue.js)
-    ↓
-FastAPI Backend
-    ↓
-AI Council Orchestrator
-    ↓
-┌─────────────────────────────┐
-│  Analysis → Decomposition   │
-│  Model Selection → Execution│
-│  Arbitration → Synthesis    │
-└─────────────────────────────┘
-    ↓
-Multiple AI APIs (OpenAI, Anthropic, etc.)
-```
-
-## Development
-
-### Running Tests
-
-```bash
-# Test the orchestrator
-python test_orchestrator.py
-
-# Test the API
-cd web_app/backend
-pytest
-```
-
-### Adding New Models
-
-1. Add model configuration to `config/ai_models.yaml`
-2. Create adapter in `web_app/backend/ai_adapters.py`
-3. Register in the factory
-
-### Customizing the UI
-
-Edit `web_app/frontend/index.html` - it's a single-file Vue.js application with Tailwind CSS.
-
-## Troubleshooting
-
-### "API key not configured"
-- Make sure you've created `.env` file with your API keys
-- Check that the model is enabled in `config/ai_council.yaml`
-
-### "Connection refused"
-- Ensure the backend is running on port 8000
-- Check firewall settings
-
-### "CORS error"
-- The backend has CORS enabled for all origins
-- If using a different port, update `apiUrl` in the frontend
-
-### "Model not available"
-- Verify API key is valid
-- Check model name matches the provider's API
-- Ensure you have credits/quota with the provider
-
-## Production Deployment
-
-### Backend
-
-```bash
-# Using Gunicorn
-gunicorn web_app.backend.main:app -w 4 -k uvicorn.workers.UvicornWorker
-
-# Using Docker
-docker build -t ai-council-backend .
-docker run -p 8000:8000 --env-file .env ai-council-backend
-```
-
-### Frontend
-
-Deploy the `frontend/index.html` to any static hosting:
-- Netlify
-- Vercel
-- GitHub Pages
-- AWS S3 + CloudFront
-
-Update the `apiUrl` in the frontend to point to your production backend.
-
-## Security Notes
-
-- **Never commit API keys** to version control
-- Use environment variables for sensitive data
-- Implement rate limiting in production
-- Add authentication for public deployments
-- Monitor API usage and costs
-
-## Cost Optimization
-
-The AI Council automatically optimizes costs by:
-- Selecting appropriate models based on task complexity
-- Using cheaper models for simple tasks
-- Parallel execution to reduce total time
-- Caching and reusing results when possible
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues and questions:
-- GitHub Issues: https://github.com/shrixtacy/Ai-Council/issues
-- Documentation: See `/docs` folder
+- JWT authentication
+- Email OTP verification
+- Session management
+- Chat with AI orchestration
+- Live orchestration visualization
+- Real-time analytics
+- Chat history
 
 ---
 
-**Built with ❤️ using AI Council Orchestrator**
+## 📝 For Project Admins
+
+### Email Configuration
+
+Email is hardcoded in `auth-backend/server.js` (lines 27-46):
+```javascript
+process.env.EMAIL_USER = 'obstructgamer@gmail.com';
+process.env.EMAIL_PASSWORD = 'ewyrxtlruykyfyda';
+```
+
+**To change:**
+1. Edit `server.js` lines 41-42
+2. Commit and push
+3. All contributors get the update
+
+### Security Notes
+
+- Email password is a Gmail app-specific password
+- Revocable anytime from Google Account
+- Limited to SMTP sending only
+- Safe for centralized email service
+
+---
+
+**Setup time: 2 minutes** ⚡
+**Email setup: 0 (hardcoded)** ✅
+**MongoDB setup: 0 (auto-sync)** ✅

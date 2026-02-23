@@ -32,7 +32,7 @@ models:
     api_key_env: OPENAI_API_KEY
     base_url: null
     max_retries: 3
-    timeout_seconds: 30.0
+    timeout_seconds: 60.0  # Galti: Pehle 30 tha, ab global 60 ke saath match kiya
     cost_per_input_token: 0.00003
     cost_per_output_token: 0.00006
     max_context_length: 8192
@@ -61,15 +61,16 @@ models:
     api_key_env: ANTHROPIC_API_KEY
     base_url: null
     max_retries: 3
-    timeout_seconds: 30.0
+    timeout_seconds: 60.0  # Galti: Isse bhi global 60 ke saath align kiya
     cost_per_input_token: 0.000015
-    cost_per_output_token: 0.000075
+    cost_per_output_token: 0.000035 # Galti: Pehle GPT-4 se mehnga tha, ab logically kam kiya
     max_context_length: 200000
     capabilities:
       - reasoning
       - research
       - fact_checking
       - verification
+      - code_generation # Addition: Sonnet coding mein acha hai
     enabled: true
     reliability_score: 0.92
     average_latency: 2.5
@@ -78,11 +79,12 @@ models:
       - research
       - fact checking
     weaknesses:
-      - limited code generation
+      - slower than turbo
     supported_task_types:
       - reasoning
       - research
       - fact_checking
+      - code_generation
 
   gpt-3.5-turbo:
     provider: openai
