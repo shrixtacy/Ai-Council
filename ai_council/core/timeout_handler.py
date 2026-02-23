@@ -323,7 +323,22 @@ def timeout_context(
 
 
 class RateLimitManager:
-    """Manages rate limiting and backoff strategies."""
+    """Manages rate limiting and backoff strategies.
+    
+    Provides thread-safe rate limiting with sliding window implementation.
+    Integrates with failure handling system to record rate limit events.
+    
+    Attributes:
+        rate_limits: Dictionary of configured rate limits per resource
+        request_history: Historical request timestamps for analysis
+        _lock: Thread lock for thread-safe operations
+    
+    Usage:
+        rate_limit_manager.set_rate_limit("openai_api", 60, burst_limit=10)
+        allowed, wait_time = rate_limit_manager.check_rate_limit("openai_api")
+        if not allowed:
+            time.sleep(wait_time)
+    """
     
     def __init__(self):
         self.rate_limits: dict[str, dict[str, Any]] = {}
@@ -336,7 +351,13 @@ class RateLimitManager:
         requests_per_minute: int,
         burst_limit: Optional[int] = None
     ):
-        """Set rate limit for a resource."""
+        """Set rate limit for a resource.
+        
+        Args:
+            resource: Resource identifier (e.g., 'openai_api')
+            requests_per_minute: Maximum requests per minute
+            burst_limit: Optional burst capacity (defaults to requests_per_minute)
+        """
         with self._lock:
             self.rate_limits[resource] = {
                 "requests_per_minute": requests_per_minute,
@@ -348,8 +369,15 @@ class RateLimitManager:
     def check_rate_limit(self, resource: str) -> tuple[bool, float]:
         """Check if request is within rate limit.
         
+        Uses sliding window algorithm for accurate rate limiting.
+        
+        Args:
+            resource: Resource identifier to check
+            
         Returns:
             tuple: (is_allowed, wait_time_seconds)
+                - is_allowed: True if request allowed, False otherwise
+                - wait_time_seconds: Seconds to wait if not allowed
         """
         with self._lock:
             if resource not in self.rate_limits:
@@ -381,7 +409,17 @@ class RateLimitManager:
         subtask_id: Optional[str] = None,
         model_id: Optional[str] = None
     ):
-        """Record a rate limit hit from external service."""
+        """Record a rate limit hit from external service.
+        
+        Integrates with failure handling system for monitoring.
+        
+        Args:
+            resource: Resource that was rate limited
+            reset_time: Optional reset time from external service
+            component: Component making the request
+            subtask_id: Optional subtask identifier
+            model_id: Optional model identifier
+        """
         failure_event = FailureEvent(
             failure_type=FailureType.RATE_LIMIT,
             component=component,
@@ -398,7 +436,19 @@ class RateLimitManager:
         resilience_manager.handle_failure(failure_event)
     
     def get_rate_limit_status(self, resource: str) -> dict[str, Any]:
-        """Get current rate limit status for a resource."""
+        """Get current rate limit status for a resource.
+        
+        Args:
+            resource: Resource identifier to check
+            
+        Returns:
+            dict: Status information including:
+                - configured: Whether rate limit is configured
+                - requests_per_minute: Maximum requests per minute
+                - current_count: Current request count in window
+                - window_start: Window start timestamp
+                - time_until_reset: Seconds until window reset
+        """
         with self._lock:
             if resource not in self.rate_limits:
                 return {"configured": False}

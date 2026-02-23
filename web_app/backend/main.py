@@ -29,7 +29,15 @@ from ai_council.core.models import ExecutionMode
 limiter = Limiter(key_func=get_remote_address)
 
 class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
-    """Middleware to add rate limit headers to responses."""
+    """Middleware to add rate limit headers to responses.
+    
+    Adds standard rate limit headers to all HTTP responses for client visibility:
+    - X-RateLimit-Limit: Total requests allowed
+    - X-RateLimit-Remaining: Requests remaining in current window
+    - X-RateLimit-Reset: Unix timestamp for window reset
+    
+    Integrates with slowapi limiter to extract rate limit information.
+    """
     
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -62,7 +70,20 @@ app.add_middleware(RateLimitHeaderMiddleware)
 app.state.limiter = limiter
 
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    """Custom rate limit exceeded handler with proper headers."""
+    """Custom rate limit exceeded handler with proper headers.
+    
+    Returns a 429 Too Many Requests response with:
+    - Standardized error format
+    - Retry-After header indicating wait time
+    - Rate limit headers for client visibility
+    
+    Args:
+        request: FastAPI request object
+        exc: RateLimitExceeded exception
+        
+    Returns:
+        JSONResponse with 429 status code and rate limit information
+    """
     retry_after = int(exc.detail.split(" ")[-1]) if " " in exc.detail else 900
     return JSONResponse(
         status_code=429,
@@ -141,7 +162,20 @@ async def root():
 @app.get("/api/status")
 @limiter.limit("100/15minutes")
 async def get_status(request: Request):
-    """Get system status."""
+    """Get system status.
+    
+    Rate limited to 100 requests per 15 minutes per IP address.
+    Returns current AI Council system status including health and metrics.
+    
+    Args:
+        request: FastAPI request object (used for rate limiting)
+        
+    Returns:
+        System status information
+        
+    Raises:
+        HTTPException: If status retrieval fails
+    """
     try:
         status = ai_council.get_system_status()
         return status
@@ -152,7 +186,21 @@ async def get_status(request: Request):
 @app.post("/api/process")
 @limiter.limit("100/15minutes")
 async def process_request(request: Request, req: RequestModel):
-    """Process a user request."""
+    """Process a user request.
+    
+    Rate limited to 100 requests per 15 minutes per IP address.
+    Main endpoint for processing user queries through the AI Council.
+    
+    Args:
+        request: FastAPI request object (used for rate limiting)
+        req: RequestModel containing query and execution mode
+        
+    Returns:
+        Processed response with content, confidence, and metadata
+        
+    Raises:
+        HTTPException: If processing fails
+    """
     try:
         # Map mode string to ExecutionMode
         mode_map = {
@@ -185,7 +233,21 @@ async def process_request(request: Request, req: RequestModel):
 @app.post("/api/estimate")
 @limiter.limit("100/15minutes")
 async def estimate_cost(request: Request, req: EstimateModel):
-    """Estimate cost and time for a request."""
+    """Estimate cost and time for a request.
+    
+    Rate limited to 100 requests per 15 minutes per IP address.
+    Provides cost and time estimates without executing the request.
+    
+    Args:
+        request: FastAPI request object (used for rate limiting)
+        req: EstimateModel containing query and execution mode
+        
+    Returns:
+        Cost and time estimate information
+        
+    Raises:
+        HTTPException: If estimation fails
+    """
     try:
         mode_map = {
             "fast": ExecutionMode.FAST,
@@ -204,7 +266,21 @@ async def estimate_cost(request: Request, req: EstimateModel):
 @app.post("/api/analyze")
 @limiter.limit("100/15minutes")
 async def analyze_tradeoffs(request: Request, req: RequestModel):
-    """Analyze cost-quality trade-offs."""
+    """Analyze cost-quality trade-offs.
+    
+    Rate limited to 100 requests per 15 minutes per IP address.
+    Analyzes different execution modes and their trade-offs.
+    
+    Args:
+        request: FastAPI request object (used for rate limiting)
+        req: RequestModel containing query and execution mode
+        
+    Returns:
+        Trade-off analysis information
+        
+    Raises:
+        HTTPException: If analysis fails
+    """
     try:
         analysis = ai_council.analyze_tradeoffs(req.query)
         return analysis
@@ -214,7 +290,20 @@ async def analyze_tradeoffs(request: Request, req: RequestModel):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates."""
+    """WebSocket endpoint for real-time updates.
+    
+    Provides real-time communication for request processing.
+    Note: WebSocket connections are not rate limited by slowapi.
+    
+    Args:
+        websocket: WebSocket connection object
+        
+    Flow:
+        1. Accept connection
+        2. Receive JSON messages with query and mode
+        3. Send status updates during processing
+        4. Return final result
+    """
     await websocket.accept()
     
     try:
