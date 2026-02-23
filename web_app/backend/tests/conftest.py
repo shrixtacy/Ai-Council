@@ -22,17 +22,7 @@ def mock_ai_council():
 
 @pytest.fixture
 def test_client(mock_ai_council):
-    from web_app.backend.main import app, startup_event
-    import asyncio
-    
-    # Run the startup event manually in the test environment
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    try:
-        loop.run_until_complete(startup_event())
-    finally:
-        loop.close()
+    from web_app.backend.main import app
     
     with TestClient(app) as client:
         yield client
