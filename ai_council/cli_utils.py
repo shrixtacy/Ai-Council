@@ -120,24 +120,24 @@ class CLIHandler:
             except Exception as e:
                 print(f"Error: {str(e)}")
 
-    def handle_estimate_only(self, ai_council: 'AICouncil', request: str, mode: str):
+    async def handle_estimate_only(self, ai_council: 'AICouncil', request: str, mode: str):
         """Handles estimate-only requests."""
         execution_mode = ExecutionMode(mode)
-        estimate = ai_council.estimate_cost(request, execution_mode)
+        estimate = await ai_council.estimate_cost(request, execution_mode)
         print(f"\nCost Estimate for '{request[:50]}...':")
         self._print_estimate(estimate)
 
-    def handle_tradeoff_analysis(self, ai_council: 'AICouncil', request: str):
+    async def handle_tradeoff_analysis(self, ai_council: 'AICouncil', request: str):
         """Handles trade-off analysis requests."""
-        analysis = ai_council.analyze_tradeoffs(request)
+        analysis = await ai_council.analyze_tradeoffs(request)
         print(f"\nTrade-off Analysis for '{request[:50]}...':")
         self._print_analysis(analysis)
 
-    def process_single_request(self, ai_council: 'AICouncil', request: str, mode: str):
+    async def process_single_request(self, ai_council: 'AICouncil', request: str, mode: str):
         """Processes a single request."""
         execution_mode = ExecutionMode(mode)
         print(f"\nProcessing request in {execution_mode.value} mode...")
-        response = ai_council.process_request(request, execution_mode)
+        response = await ai_council.process_request(request, execution_mode)
         
         print(f"\n" + "="*60)
         print("AI COUNCIL RESPONSE")

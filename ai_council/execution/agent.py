@@ -253,6 +253,12 @@ class BaseExecutionAgent(ExecutionAgent):
         """Execute subtask with fallback model."""
         logger.info(f"Attempting fallback execution with model {fallback_model_id}")
         
+        # TODO: Implement real fallback execution (#113)
+        # We need to resolve the fallback model instance from the ModelRegistry
+        # and dynamically invoke the normal execution path (e.g., self.execute),
+        # instead of returning a hard-coded degraded AgentResponse with 
+        # a default SelfAssessment and RiskLevel.
+
         # This is a simplified implementation - in practice, you'd need to
         # get the actual fallback model instance from a registry
         # For now, return a degraded response
