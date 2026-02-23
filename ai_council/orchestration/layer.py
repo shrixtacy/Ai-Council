@@ -1,6 +1,7 @@
 """Implementation of the OrchestrationLayer for main request processing pipeline."""
 
 import logging
+import asyncio
 import time
 from typing import List, Dict, Optional, Any, Callable
 from datetime import datetime
@@ -141,7 +142,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     # PIPELINE STAGE METHODS - Extracted for better readability
     # =========================================================================
     
-    def _stage_analyze_and_create_task(
+    async def _stage_analyze_and_create_task(
         self, 
         user_input: str, 
         execution_mode: ExecutionMode
@@ -156,9 +157,9 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         Returns:
             Task: Created task object
         """
-        return self._create_task_from_input_protected(user_input, execution_mode)
+        return await self._create_task_from_input_protected(user_input, execution_mode)
     
-    def _stage_estimate_cost(self, task: Task) -> Optional[CostEstimate]:
+    async def _stage_estimate_cost(self, task: Task) -> Optional[CostEstimate]:
         """
         Stage 2: Estimate cost and time for the task.
         
@@ -169,12 +170,12 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             Optional[CostEstimate]: Cost estimate if available
         """
         try:
-            return self.estimate_cost_and_time(task)
+            return await self.estimate_cost_and_time(task)
         except Exception as e:
             logger.warning(f"Cost estimation failed: {str(e)}")
             return None
     
-    def _stage_decompose_task(self, task: Task) -> List[Subtask]:
+    async def _stage_decompose_task(self, task: Task) -> List[Subtask]:
         """
         Stage 3: Decompose task into subtasks.
         
@@ -185,13 +186,13 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             List[Subtask]: List of subtasks
         """
         try:
-            return self._decompose_task_protected(task)
+            return await self._decompose_task_protected(task)
         except Exception as e:
             logger.error(f"Task decomposition failed: {str(e)}")
             # Fallback to single subtask
-            return [self._create_fallback_subtask(task)]
+            return [await self._create_fallback_subtask(task)]
     
-    def _stage_plan_execution(self, subtasks: List[Subtask]):
+    async def _stage_plan_execution(self, subtasks: List[Subtask]):
         """
         Stage 4: Create execution plan for subtasks.
         
@@ -202,12 +203,12 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             ExecutionPlan: Plan for parallel/sequential execution
         """
         try:
-            return self.model_context_protocol.determine_parallelism(subtasks)
+            return await self.model_context_protocol.determine_parallelism(subtasks)
         except Exception as e:
             logger.warning(f"Execution planning failed: {str(e)}")
             return self._create_sequential_plan(subtasks)
     
-    def _stage_execute_subtasks(
+    async def _stage_execute_subtasks(
         self, 
         subtasks: List[Subtask], 
         execution_plan, 
@@ -224,7 +225,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         Returns:
             List[AgentResponse]: Responses from all subtasks
         """
-        return self._execute_subtasks_with_resilience(
+        return await self._execute_subtasks_with_resilience(
             subtasks, execution_plan, execution_mode
         )
     
@@ -274,7 +275,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         
         return "continue"
     
-    def _stage_arbitrate(
+    async def _stage_arbitrate(
         self, 
         responses: List[AgentResponse]
     ) -> List[AgentResponse]:
@@ -291,14 +292,14 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             return responses
         
         try:
-            arbitration_result = self._arbitrate_with_protection(responses)
+            arbitration_result = await self._arbitrate_with_protection(responses)
             return arbitration_result.validated_responses
         except Exception as e:
             logger.warning(f"Arbitration failed: {str(e)}")
             # Fallback: use first successful response
             return responses[:1]
     
-    def _stage_synthesize(
+    async def _stage_synthesize(
         self, 
         validated_responses: List[AgentResponse]
     ) -> FinalResponse:
@@ -312,7 +313,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             FinalResponse: Synthesized final response
         """
         try:
-            return self._synthesize_with_protection(validated_responses)
+            return await self._synthesize_with_protection(validated_responses)
         except Exception as e:
             logger.error(f"Synthesis failed: {str(e)}")
             # Guard: Handle empty validated_responses to avoid IndexError
@@ -334,7 +335,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 success=True
             )
     
-    def _stage_attach_metadata(
+    async def _stage_attach_metadata(
         self, 
         response: FinalResponse, 
         execution_metadata: ExecutionMetadata
@@ -349,14 +350,14 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         Returns:
             FinalResponse: Response with metadata attached
         """
-        return self.synthesis_layer.attach_metadata(response, execution_metadata)
+        return await self.synthesis_layer.attach_metadata(response, execution_metadata)
     
     # =========================================================================
     # MAIN PROCESS REQUEST - Now uses extracted stage methods
     # =========================================================================
     
     @with_adaptive_timeout("request_processing", "orchestration_layer")
-    def process_request(self, user_input: str, execution_mode: ExecutionMode) -> FinalResponse:
+    async def process_request(self, user_input: str, execution_mode: ExecutionMode) -> FinalResponse:
         """
         Process a user request through the entire pipeline.
         
@@ -381,27 +382,27 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             logger.info(f"Processing request in {execution_mode.value} mode: {user_input[:100]}...")
             
             # Stage 1: Analysis and Task Creation
-            task = self._stage_analyze_and_create_task(user_input, execution_mode)
+            task = await self._stage_analyze_and_create_task(user_input, execution_mode)
             execution_metadata.execution_path.append("task_creation")
             
             # Stage 2: Cost Estimation (if required by execution mode)
             if execution_mode != ExecutionMode.FAST:
-                cost_estimate = self._stage_estimate_cost(task)
+                cost_estimate = await self._stage_estimate_cost(task)
                 if cost_estimate:
                     logger.info(f"Estimated cost: ${cost_estimate.estimated_cost:.4f}, time: {cost_estimate.estimated_time:.1f}s")
             
             # Stage 3: Task Decomposition
-            subtasks = self._stage_decompose_task(task)
+            subtasks = await self._stage_decompose_task(task)
             execution_metadata.execution_path.append("task_decomposition")
             logger.info(f"Decomposed into {len(subtasks)} subtasks")
             
             # Stage 4: Execution Planning
-            execution_plan = self._stage_plan_execution(subtasks)
+            execution_plan = await self._stage_plan_execution(subtasks)
             execution_metadata.parallel_executions = len(execution_plan.parallel_groups)
             execution_metadata.execution_path.append("execution_planning")
             
             # Stage 5: Execute Subtasks
-            agent_responses = self._stage_execute_subtasks(
+            agent_responses = await self._stage_execute_subtasks(
                 subtasks, execution_plan, execution_mode
             )
             execution_metadata.execution_path.append("subtask_execution")
@@ -429,16 +430,16 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 )
             
             # Stage 6: Arbitration
-            validated_responses = self._stage_arbitrate(successful_responses)
+            validated_responses = await self._stage_arbitrate(successful_responses)
             execution_metadata.execution_path.append("arbitration")
             
             # Stage 7: Synthesis
-            final_response = self._stage_synthesize(validated_responses)
+            final_response = await self._stage_synthesize(validated_responses)
             execution_metadata.execution_path.append("synthesis")
             
             # Stage 8: Attach Metadata
             execution_metadata.total_execution_time = time.time() - start_time
-            final_response = self._stage_attach_metadata(final_response, execution_metadata)
+            final_response = await self._stage_attach_metadata(final_response, execution_metadata)
             
             logger.info(f"Request processed successfully in {execution_metadata.total_execution_time:.2f}s")
             return final_response
@@ -473,11 +474,11 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     # PROTECTED METHODS - With circuit breaker protection
     # =========================================================================
     
-    def _create_task_from_input_protected(self, user_input: str, execution_mode: ExecutionMode) -> Task:
+    async def _create_task_from_input_protected(self, user_input: str, execution_mode: ExecutionMode) -> Task:
         """Create a Task object from user input with circuit breaker protection."""
-        def protected_analysis():
-            intent = self.analysis_engine.analyze_intent(user_input)
-            complexity = self.analysis_engine.determine_complexity(user_input)
+        async def protected_analysis():
+            intent = await self.analysis_engine.analyze_intent(user_input)
+            complexity = await self.analysis_engine.determine_complexity(user_input)
             
             return Task(
                 content=user_input,
@@ -487,50 +488,50 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             )
         
         try:
-            return self.analysis_cb.call(protected_analysis)
+            return await self.analysis_cb.async_call(protected_analysis)
         except Exception as e:
             if isinstance(e, AICouncilError):
                 raise
             raise OrchestrationError(f"Analysis engine failure: {str(e)}", original_error=e)
     
-    def _decompose_task_protected(self, task: Task) -> List[Subtask]:
+    async def _decompose_task_protected(self, task: Task) -> List[Subtask]:
         """Decompose task into subtasks with circuit breaker protection."""
-        def protected_decomposition():
-            subtasks = self.task_decomposer.decompose(task)
+        async def protected_decomposition():
+            subtasks = await self.task_decomposer.decompose(task)
             
             # Validate decomposition
-            if not self.task_decomposer.validate_decomposition(subtasks):
+            if not await self.task_decomposer.validate_decomposition(subtasks):
                 logger.warning("Task decomposition validation failed")
                 raise ValueError("Invalid task decomposition")
             
             return subtasks
         
         try:
-            return self.decomposer_cb.call(protected_decomposition)
+            return await self.decomposer_cb.async_call(protected_decomposition)
         except Exception as e:
             if isinstance(e, AICouncilError):
                 raise
             raise OrchestrationError(f"Task decomposer failure: {str(e)}", original_error=e)
     
-    def _arbitrate_with_protection(self, responses: List[AgentResponse]):
+    async def _arbitrate_with_protection(self, responses: List[AgentResponse]):
         """Arbitrate responses with circuit breaker protection."""
-        def protected_arbitration():
-            return self.arbitration_layer.arbitrate(responses)
+        async def protected_arbitration():
+            return await self.arbitration_layer.arbitrate(responses)
         
         try:
-            return self.arbitration_cb.call(protected_arbitration)
+            return await self.arbitration_cb.async_call(protected_arbitration)
         except Exception as e:
             if isinstance(e, AICouncilError):
                 raise
             raise OrchestrationError(f"Arbitration layer failure: {str(e)}", original_error=e)
     
-    def _synthesize_with_protection(self, validated_responses: List[AgentResponse]) -> FinalResponse:
+    async def _synthesize_with_protection(self, validated_responses: List[AgentResponse]) -> FinalResponse:
         """Synthesize final response with circuit breaker protection."""
-        def protected_synthesis():
-            return self.synthesis_layer.synthesize(validated_responses)
+        async def protected_synthesis():
+            return await self.synthesis_layer.synthesize(validated_responses)
         
         try:
-            return self.synthesis_cb.call(protected_synthesis)
+            return await self.synthesis_cb.async_call(protected_synthesis)
         except Exception as e:
             if isinstance(e, AICouncilError):
                 raise
@@ -540,11 +541,11 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     # HELPER METHODS
     # =========================================================================
     
-    def _create_fallback_subtask(self, task: Task) -> Subtask:
+    async def _create_fallback_subtask(self, task: Task) -> Subtask:
         """Create a fallback subtask when decomposition fails."""
         task_types = []
         try:
-            task_types = self.analysis_engine.classify_task_type(task.content)
+            task_types = await self.analysis_engine.classify_task_type(task.content)
         except Exception:
             from ..core.models import TaskType
             task_types = [TaskType.REASONING]  # Default fallback
@@ -589,7 +590,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     # EXECUTION METHODS - Refactored for better organization
     # =========================================================================
     
-    def _execute_subtasks_with_resilience(
+    async def _execute_subtasks_with_resilience(
         self, 
         subtasks: List[Subtask], 
         execution_plan, 
@@ -601,7 +602,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         
         # Execute parallel groups sequentially
         for group_index, group in enumerate(execution_plan.parallel_groups):
-            group_responses = self._execute_parallel_group_resilient(group, execution_mode)
+            group_responses = await self._execute_parallel_group_resilient(group, execution_mode)
             all_responses.extend(group_responses)
             
             # Check group success rate
@@ -617,21 +618,18 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                     
         return all_responses
     
-    def _execute_parallel_group_resilient(
+    async def _execute_parallel_group_resilient(
         self, 
         subtasks: List[Subtask], 
         execution_mode: ExecutionMode
     ) -> List[AgentResponse]:
         """Execute a group of subtasks with resilience mechanisms."""
-        responses = []
+        coros = [self._execute_single_subtask(subtask, execution_mode) for subtask in subtasks]
+        responses = await asyncio.gather(*coros)
         
-        for subtask in subtasks:
-            response = self._execute_single_subtask(subtask, execution_mode)
-            responses.append(response)
-        
-        return responses
+        return list(responses)
     
-    def _execute_single_subtask(
+    async def _execute_single_subtask(
         self, 
         subtask: Subtask, 
         execution_mode: ExecutionMode
@@ -693,7 +691,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 )
             
             # Execute subtask with timeout protection
-            response = timeout_handler.execute_with_timeout(
+            response = await timeout_handler.execute_with_timeout(
                 self.execution_agent.execute,
                 adaptive_timeout_manager.get_adaptive_timeout("subtask_execution"),
                 "subtask_execution",
@@ -739,7 +737,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     # PUBLIC METHODS - Required by interface
     # =========================================================================
     
-    def estimate_cost_and_time(self, task: Task) -> CostEstimate:
+    async def estimate_cost_and_time(self, task: Task) -> CostEstimate:
         """
         Estimate the cost and time for executing a task using cost optimization.
         
@@ -751,7 +749,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         """
         try:
             # Decompose task to get subtasks for estimation
-            subtasks = self.task_decomposer.decompose(task)
+            subtasks = await self.task_decomposer.decompose(task)
             
             # Use cost optimizer for comprehensive cost analysis
             cost_breakdown = self.cost_optimizer.estimate_execution_cost(
@@ -806,7 +804,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 confidence=0.3
             )
     
-    def handle_failure(self, failure: ExecutionFailure) -> FallbackStrategy:
+    async def handle_failure(self, failure: ExecutionFailure) -> FallbackStrategy:
         """
         Handle execution failures with appropriate fallback strategies.
         
@@ -823,7 +821,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             try:
                 subtask = self._get_subtask_by_id(failure.subtask_id)
                 if subtask:
-                    fallback_selection = self.model_context_protocol.select_fallback(
+                    fallback_selection = await self.model_context_protocol.select_fallback(
                         failure.model_id, subtask
                     )
                     return FallbackStrategy(
@@ -850,7 +848,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         """Get subtask by ID - simplified implementation."""
         return None
     
-    def analyze_cost_quality_tradeoffs(self, task: Task) -> Dict[str, Any]:
+    async def analyze_cost_quality_tradeoffs(self, task: Task) -> Dict[str, Any]:
         """
         Analyze cost vs quality trade-offs for a task across different execution modes.
         
@@ -861,7 +859,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             Dict[str, Any]: Analysis results including recommendations
         """
         try:
-            subtasks = self.task_decomposer.decompose(task)
+            subtasks = await self.task_decomposer.decompose(task)
             analysis_results = {}
             
             for mode in ExecutionMode:

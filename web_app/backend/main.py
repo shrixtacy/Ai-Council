@@ -133,7 +133,7 @@ async def process_request(request: RequestModel, ai_council: AICouncil = Depends
         mode = mode_map.get(request.mode.lower(), ExecutionMode.BALANCED)
         
         # Process the request
-        response = ai_council.process_request(request.query, mode)
+        response = await ai_council.process_request(request.query, mode)
         
         return {
             "success": response.success,
@@ -162,7 +162,7 @@ async def estimate_cost(request: EstimateModel, ai_council: AICouncil = Depends(
         }
         
         mode = mode_map.get(request.mode.lower(), ExecutionMode.BALANCED)
-        estimate = ai_council.estimate_cost(request.query, mode)
+        estimate = await ai_council.estimate_cost(request.query, mode)
         
         return estimate
     except Exception as e:
@@ -173,7 +173,7 @@ async def estimate_cost(request: EstimateModel, ai_council: AICouncil = Depends(
 async def analyze_tradeoffs(request: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
     """Analyze cost-quality trade-offs."""
     try:
-        analysis = ai_council.analyze_tradeoffs(request.query)
+        analysis = await ai_council.analyze_tradeoffs(request.query)
         return analysis
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -207,7 +207,7 @@ async def websocket_endpoint(websocket: WebSocket):
             }
             
             execution_mode = mode_map.get(mode.lower(), ExecutionMode.BALANCED)
-            response = ai_council.process_request(query, execution_mode)
+            response = await ai_council.process_request(query, execution_mode)
             
             # Send result
             await websocket.send_json({

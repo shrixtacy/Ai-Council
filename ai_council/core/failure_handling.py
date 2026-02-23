@@ -144,6 +144,24 @@ class CircuitBreaker:
         except Exception as e:
             self._on_failure()
             raise e
+            
+    async def async_call(self, func: Callable, *args, **kwargs) -> Any:
+        """Execute an asynchronous function through the circuit breaker."""
+        with self._lock:
+            if self.state == CircuitBreakerState.OPEN:
+                if self._should_attempt_reset():
+                    self.state = CircuitBreakerState.HALF_OPEN
+                    logger.info(f"Circuit breaker {self.name} moved to HALF_OPEN")
+                else:
+                    raise CircuitBreakerOpenError(f"Circuit breaker {self.name} is OPEN")
+        
+        try:
+            result = await func(*args, **kwargs)
+            self._on_success()
+            return result
+        except Exception as e:
+            self._on_failure()
+            raise e
     
     def _should_attempt_reset(self) -> bool:
         """Check if enough time has passed to attempt reset."""

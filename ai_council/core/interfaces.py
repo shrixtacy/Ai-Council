@@ -14,7 +14,7 @@ class AnalysisEngine(ABC):
     """Abstract base class for analyzing user input and determining task characteristics."""
     
     @abstractmethod
-    def analyze_intent(self, input_text: str) -> TaskIntent:
+    async def analyze_intent(self, input_text: str) -> TaskIntent:
         """Analyze user input to determine the intent of the request.
         
         Args:
@@ -26,7 +26,7 @@ class AnalysisEngine(ABC):
         pass
     
     @abstractmethod
-    def determine_complexity(self, input_text: str) -> ComplexityLevel:
+    async def determine_complexity(self, input_text: str) -> ComplexityLevel:
         """Determine the complexity level of a user request.
         
         Args:
@@ -38,7 +38,7 @@ class AnalysisEngine(ABC):
         pass
     
     @abstractmethod
-    def classify_task_type(self, input_text: str) -> List[TaskType]:
+    async def classify_task_type(self, input_text: str) -> List[TaskType]:
         """Classify the types of tasks required to fulfill the request.
         
         Args:
@@ -54,7 +54,7 @@ class TaskDecomposer(ABC):
     """Abstract base class for decomposing complex tasks into subtasks."""
     
     @abstractmethod
-    def decompose(self, task: Task) -> List[Subtask]:
+    async def decompose(self, task: Task) -> List[Subtask]:
         """Decompose a complex task into smaller, atomic subtasks.
         
         Args:
@@ -66,7 +66,7 @@ class TaskDecomposer(ABC):
         pass
     
     @abstractmethod
-    def assign_metadata(self, subtask: Subtask) -> Subtask:
+    async def assign_metadata(self, subtask: Subtask) -> Subtask:
         """Assign metadata to a subtask including priority, risk level, etc.
         
         Args:
@@ -78,7 +78,7 @@ class TaskDecomposer(ABC):
         pass
     
     @abstractmethod
-    def validate_decomposition(self, subtasks: List[Subtask]) -> bool:
+    async def validate_decomposition(self, subtasks: List[Subtask]) -> bool:
         """Validate that a decomposition is complete and consistent.
         
         Args:
@@ -111,7 +111,7 @@ class ModelContextProtocol(ABC):
     """Abstract base class for intelligent task routing and model selection."""
     
     @abstractmethod
-    def route_task(self, subtask: Subtask) -> ModelSelection:
+    async def route_task(self, subtask: Subtask) -> ModelSelection:
         """Route a subtask to the most appropriate model.
         
         Args:
@@ -123,7 +123,7 @@ class ModelContextProtocol(ABC):
         pass
     
     @abstractmethod
-    def select_fallback(self, failed_model: str, subtask: Subtask) -> ModelSelection:
+    async def select_fallback(self, failed_model: str, subtask: Subtask) -> ModelSelection:
         """Select a fallback model when the primary model fails.
         
         Args:
@@ -136,7 +136,7 @@ class ModelContextProtocol(ABC):
         pass
     
     @abstractmethod
-    def determine_parallelism(self, subtasks: List[Subtask]) -> ExecutionPlan:
+    async def determine_parallelism(self, subtasks: List[Subtask]) -> ExecutionPlan:
         """Determine which subtasks can be executed in parallel.
         
         Args:
@@ -152,7 +152,7 @@ class AIModel(ABC):
     """Abstract base class for AI model implementations."""
     
     @abstractmethod
-    def generate_response(self, prompt: str, **kwargs) -> str:
+    async def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate a response from the AI model.
         
         Args:
@@ -197,7 +197,7 @@ class ExecutionAgent(ABC):
     """Abstract base class for agents that execute subtasks using AI models."""
     
     @abstractmethod
-    def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
+    async def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
         """Execute a subtask using the specified AI model.
         
         Args:
@@ -210,7 +210,7 @@ class ExecutionAgent(ABC):
         pass
     
     @abstractmethod
-    def generate_self_assessment(self, response: str, subtask: Subtask) -> SelfAssessment:
+    async def generate_self_assessment(self, response: str, subtask: Subtask) -> SelfAssessment:
         """Generate a self-assessment of the agent's performance.
         
         Args:
@@ -223,7 +223,7 @@ class ExecutionAgent(ABC):
         pass
     
     @abstractmethod
-    def handle_model_failure(self, error: ModelError) -> FailureResponse:
+    async def handle_model_failure(self, error: ModelError) -> FailureResponse:
         """Handle failures from the underlying AI model.
         
         Args:
@@ -265,7 +265,7 @@ class ArbitrationLayer(ABC):
     """Abstract base class for arbitrating between multiple agent responses."""
     
     @abstractmethod
-    def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
+    async def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
         """Arbitrate between multiple agent responses to resolve conflicts.
         
         Args:
@@ -277,7 +277,7 @@ class ArbitrationLayer(ABC):
         pass
     
     @abstractmethod
-    def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
+    async def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
         """Detect conflicts between multiple agent responses.
         
         Args:
@@ -289,7 +289,7 @@ class ArbitrationLayer(ABC):
         pass
     
     @abstractmethod
-    def resolve_contradiction(self, conflict: Conflict) -> Resolution:
+    async def resolve_contradiction(self, conflict: Conflict) -> Resolution:
         """Resolve a specific contradiction between responses.
         
         Args:
@@ -317,7 +317,7 @@ class SynthesisLayer(ABC):
     """Abstract base class for synthesizing final responses from validated outputs."""
     
     @abstractmethod
-    def synthesize(self, validated_responses: List[AgentResponse]) -> FinalResponse:
+    async def synthesize(self, validated_responses: List[AgentResponse]) -> FinalResponse:
         """Synthesize a final response from validated agent responses.
         
         Args:
@@ -329,7 +329,7 @@ class SynthesisLayer(ABC):
         pass
     
     @abstractmethod
-    def normalize_output(self, content: str) -> str:
+    async def normalize_output(self, content: str) -> str:
         """Normalize output content for consistency.
         
         Args:
@@ -341,7 +341,7 @@ class SynthesisLayer(ABC):
         pass
     
     @abstractmethod
-    def attach_metadata(self, response: FinalResponse, metadata: ExecutionMetadata) -> FinalResponse:
+    async def attach_metadata(self, response: FinalResponse, metadata: ExecutionMetadata) -> FinalResponse:
         """Attach execution metadata to the final response.
         
         Args:
@@ -436,7 +436,7 @@ class OrchestrationLayer(ABC):
     """Abstract base class for the main orchestration layer."""
     
     @abstractmethod
-    def process_request(self, user_input: str, execution_mode: ExecutionMode) -> FinalResponse:
+    async def process_request(self, user_input: str, execution_mode: ExecutionMode) -> FinalResponse:
         """Process a user request through the entire pipeline.
         
         Args:
@@ -449,7 +449,7 @@ class OrchestrationLayer(ABC):
         pass
     
     @abstractmethod
-    def estimate_cost_and_time(self, task: Task) -> CostEstimate:
+    async def estimate_cost_and_time(self, task: Task) -> CostEstimate:
         """Estimate the cost and time for executing a task.
         
         Args:
@@ -461,7 +461,7 @@ class OrchestrationLayer(ABC):
         pass
     
     @abstractmethod
-    def handle_failure(self, failure: ExecutionFailure) -> FallbackStrategy:
+    async def handle_failure(self, failure: ExecutionFailure) -> FallbackStrategy:
         """Handle execution failures with appropriate fallback strategies.
         
         Args:

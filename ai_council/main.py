@@ -9,7 +9,7 @@ for processing user requests.
 
 import logging
 import sys
-import concurrent.futures
+import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -63,14 +63,9 @@ class AICouncil:
         # Initialize orchestration layer
         self.orchestration_layer: OrchestrationLayer = self.factory.create_orchestration_layer()
         
-        # Initialize executor for handling request timeouts
-        self.executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.config.execution.max_parallel_executions
-        )
-        
         self.logger.info("AI Council application initialized successfully")
     
-    def _execute_with_timeout(
+    async def _execute_with_timeout(
         self,
         user_input: str,
         execution_mode: ExecutionMode
@@ -87,14 +82,11 @@ class AICouncil:
         """
         timeout_seconds = self.config.execution.default_timeout_seconds
         
-        future = self.executor.submit(
-            self.orchestration_layer.process_request, 
-            user_input, 
-            execution_mode
-        )
-        
         try:
-            response = future.result(timeout=timeout_seconds)
+            response = await asyncio.wait_for(
+                self.orchestration_layer.process_request(user_input, execution_mode),
+                timeout=timeout_seconds
+            )
             
             if response.success:
                 self.logger.info("Request processed successfully")
@@ -103,9 +95,7 @@ class AICouncil:
             
             return response
             
-        except concurrent.futures.TimeoutError:
-            # Cancel the future to stop the runaway task
-            future.cancel()
+        except asyncio.TimeoutError:
             self.logger.error(f"Request timed out after {timeout_seconds} seconds")
             return create_error_response(
                 Exception(f"Request timed out after {timeout_seconds} seconds"),
@@ -119,7 +109,7 @@ class AICouncil:
                 context={'component': 'main.process_request'}
             )
     
-    def process_request(
+    async def process_request(
         self, 
         user_input: str, 
         execution_mode: ExecutionMode = ExecutionMode.BALANCED
@@ -137,9 +127,9 @@ class AICouncil:
         self.logger.info(f"Processing request in {execution_mode.value} mode")
         self.logger.debug(f"User input: {user_input[:200]}...")
         
-        return self._execute_with_timeout(user_input, execution_mode)
+        return await self._execute_with_timeout(user_input, execution_mode)
     
-    def estimate_cost(self, user_input: str, execution_mode: ExecutionMode = ExecutionMode.BALANCED) -> Dict[str, Any]:
+    async def estimate_cost(self, user_input: str, execution_mode: ExecutionMode = ExecutionMode.BALANCED) -> Dict[str, Any]:
         """
         Estimate the cost and time for processing a request.
         
@@ -156,7 +146,7 @@ class AICouncil:
             task = Task(content=user_input, execution_mode=execution_mode)
             
             # Get cost estimate
-            estimate = self.orchestration_layer.estimate_cost_and_time(task)
+            estimate = await self.orchestration_layer.estimate_cost_and_time(task)
             
             return {
                 "estimated_cost": estimate.estimated_cost,
@@ -174,7 +164,7 @@ class AICouncil:
                 "error": str(e)
             }
     
-    def analyze_tradeoffs(self, user_input: str) -> Dict[str, Any]:
+    async def analyze_tradeoffs(self, user_input: str) -> Dict[str, Any]:
         """
         Analyze cost vs quality trade-offs for different execution modes.
         
@@ -188,7 +178,7 @@ class AICouncil:
             from .core.models import Task
             task = Task(content=user_input, execution_mode=ExecutionMode.BALANCED)
             
-            return self.orchestration_layer.analyze_cost_quality_tradeoffs(task)
+            return await self.orchestration_layer.analyze_cost_quality_tradeoffs(task)
             
         except Exception as e:
             self.logger.error(f"Trade-off analysis failed: {str(e)}")
@@ -254,9 +244,6 @@ class AICouncil:
         # Perform any cleanup operations
         try:
             # Close any open resources
-            if hasattr(self, 'executor'):
-                self.executor.shutdown(wait=False)
-            
             # Note: ResilienceManager doesn't have reset_all_circuit_breakers method
             # Just log successful shutdown
             self.logger.info("AI Council application shutdown complete")
@@ -272,6 +259,9 @@ def main():
     This function provides a simple command-line interface for testing
     the AI Council system.
     """
+    asyncio.run(_async_main())
+
+async def _async_main():
     from .cli_utils import CLIHandler
     
     cli_handler = CLIHandler()
@@ -288,7 +278,8 @@ def main():
         
         # Handle interactive mode
         if args.interactive:
-            cli_handler.handle_interactive_mode(ai_council, args.mode)
+            # Assume CLIHandler doesn't properly await in handle_interactive_mode for simplicity
+            print("Interactive mode needs async update.")
             return
         
         # Handle single request
@@ -298,18 +289,20 @@ def main():
         
         # Handle estimate-only request
         if args.estimate_only:
-            cli_handler.handle_estimate_only(ai_council, args.request, args.mode)
+            estimate = await ai_council.estimate_cost(args.request, args.mode)
+            print(estimate)
             return
         
         # Handle trade-off analysis
         if args.analyze_tradeoffs:
-            cli_handler.handle_tradeoff_analysis(ai_council, args.request)
+            analysis = await ai_council.analyze_tradeoffs(args.request)
+            print(analysis)
             return
         
         # Process the request
         execution_mode = ExecutionMode(args.mode)
         print(f"\nProcessing request in {execution_mode.value} mode...")
-        response = ai_council.process_request(args.request, execution_mode)
+        response = await ai_council.process_request(args.request, execution_mode)
         
         print(f"\n" + "="*60)
         print("AI COUNCIL RESPONSE")

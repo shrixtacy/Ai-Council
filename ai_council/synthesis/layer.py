@@ -16,7 +16,7 @@ class SynthesisLayerImpl(SynthesisLayer):
         self._redundancy_threshold = 0.7  # Similarity threshold for redundancy detection
         self._max_response_length = 5000  # Maximum length for final response
     
-    def synthesize(self, validated_responses: List[AgentResponse]) -> FinalResponse:
+    async def synthesize(self, validated_responses: List[AgentResponse]) -> FinalResponse:
         """Synthesize a final response from validated agent responses.
         
         This method combines multiple validated responses into a single coherent output
@@ -59,7 +59,7 @@ class SynthesisLayerImpl(SynthesisLayer):
             synthesized_content = self._synthesize_content(deduplicated_content)
             
             # Normalize the output
-            normalized_content = self.normalize_output(synthesized_content)
+            normalized_content = await self.normalize_output(synthesized_content)
             
             # Calculate overall confidence
             overall_confidence = self._calculate_overall_confidence(validated_responses)
@@ -86,7 +86,7 @@ class SynthesisLayerImpl(SynthesisLayer):
                 error_message=f"Synthesis failed: {str(e)}"
             )
     
-    def normalize_output(self, content: str) -> str:
+    async def normalize_output(self, content: str) -> str:
         """Normalize output content for consistency in tone and structure.
         
         This method standardizes formatting, removes excessive whitespace,
@@ -128,7 +128,7 @@ class SynthesisLayerImpl(SynthesisLayer):
         
         return normalized
     
-    def attach_metadata(self, response: FinalResponse, metadata: ExecutionMetadata) -> FinalResponse:
+    async def attach_metadata(self, response: FinalResponse, metadata: ExecutionMetadata) -> FinalResponse:
         """Attach execution metadata to the final response for explainability.
         
         This method adds detailed execution information to the response,
@@ -389,7 +389,7 @@ class NoOpSynthesisLayer(SynthesisLayer):
         """Initialize the no-op synthesis layer."""
         pass
     
-    def synthesize(self, validated_responses: List[AgentResponse]) -> FinalResponse:
+    async def synthesize(self, validated_responses: List[AgentResponse]) -> FinalResponse:
         """
         Return the first successful response without synthesis.
         
@@ -443,7 +443,7 @@ class NoOpSynthesisLayer(SynthesisLayer):
             success=True
         )
     
-    def normalize_output(self, content: str) -> str:
+    async def normalize_output(self, content: str) -> str:
         """
         Return content as-is without normalization.
         
@@ -455,7 +455,7 @@ class NoOpSynthesisLayer(SynthesisLayer):
         """
         return content
     
-    def attach_metadata(self, response: FinalResponse, metadata: ExecutionMetadata) -> FinalResponse:
+    async def attach_metadata(self, response: FinalResponse, metadata: ExecutionMetadata) -> FinalResponse:
         """
         Attach metadata to response.
         

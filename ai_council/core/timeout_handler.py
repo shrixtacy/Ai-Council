@@ -424,30 +424,48 @@ rate_limit_manager = RateLimitManager()
 def with_adaptive_timeout(operation: str, component: str = ""):
     """Decorator for adaptive timeout based on historical performance."""
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> T:
-            # Get adaptive timeout
-            timeout_seconds = adaptive_timeout_manager.get_adaptive_timeout(operation)
+        if asyncio.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs) -> T:
+                timeout_seconds = adaptive_timeout_manager.get_adaptive_timeout(operation)
+                start_time = time.time()
+                try:
+                    result = await timeout_handler.execute_with_timeout(
+                        func, timeout_seconds, operation, component,
+                        None, None, *args, **kwargs
+                    )
+                    execution_time = time.time() - start_time
+                    adaptive_timeout_manager.record_execution_time(operation, execution_time)
+                    return result
+                except TimeoutError:
+                    adaptive_timeout_manager.record_execution_time(operation, timeout_seconds)
+                    raise
+            return async_wrapper
+        else:
+            @functools.wraps(func)
+            def sync_wrapper(*args, **kwargs) -> T:
+                # Get adaptive timeout
+                timeout_seconds = adaptive_timeout_manager.get_adaptive_timeout(operation)
+                
+                start_time = time.time()
+                try:
+                    result = timeout_handler.execute_with_timeout(
+                        func, timeout_seconds, operation, component,
+                        None, None, *args, **kwargs
+                    )
+                    
+                    # Record successful execution time
+                    execution_time = time.time() - start_time
+                    adaptive_timeout_manager.record_execution_time(operation, execution_time)
+                    
+                    return result
+                    
+                except TimeoutError:
+                    # Record timeout (use timeout duration as execution time)
+                    adaptive_timeout_manager.record_execution_time(operation, timeout_seconds)
+                    raise
             
-            start_time = time.time()
-            try:
-                result = timeout_handler.execute_with_timeout(
-                    func, timeout_seconds, operation, component,
-                    None, None, *args, **kwargs
-                )
-                
-                # Record successful execution time
-                execution_time = time.time() - start_time
-                adaptive_timeout_manager.record_execution_time(operation, execution_time)
-                
-                return result
-                
-            except TimeoutError:
-                # Record timeout (use timeout duration as execution time)
-                adaptive_timeout_manager.record_execution_time(operation, timeout_seconds)
-                raise
-        
-        return wrapper
+            return sync_wrapper
     return decorator
 
 

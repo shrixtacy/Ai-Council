@@ -18,9 +18,9 @@ class OpenAIAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using OpenAI API."""
@@ -71,9 +71,9 @@ class AnthropicAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using Anthropic API."""
@@ -123,9 +123,9 @@ class GoogleGeminiAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using Google Gemini API."""
@@ -174,9 +174,9 @@ class GroqAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using Groq API."""
@@ -227,9 +227,9 @@ class MistralAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using Mistral API."""
@@ -280,9 +280,9 @@ class XAIAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-        """Generate response (synchronous wrapper)."""
-        return self.generate(prompt, **kwargs)
+    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+        """Generate response."""
+        return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
         """Generate response using xAI API."""

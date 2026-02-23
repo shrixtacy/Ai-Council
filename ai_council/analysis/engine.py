@@ -15,7 +15,7 @@ class BasicAnalysisEngine(AnalysisEngine):
         self._complexity_indicators = self._build_complexity_indicators()
         self._task_type_patterns = self._build_task_type_patterns()
     
-    def analyze_intent(self, input_text: str) -> TaskIntent:
+    async def analyze_intent(self, input_text: str) -> TaskIntent:
         """Analyze user input to determine the intent of the request.
         
         Args:
@@ -56,7 +56,7 @@ class BasicAnalysisEngine(AnalysisEngine):
         # Default to instruction if unclear
         return TaskIntent.INSTRUCTION
     
-    def determine_complexity(self, input_text: str) -> ComplexityLevel:
+    async def determine_complexity(self, input_text: str) -> ComplexityLevel:
         """Determine the complexity level of a user request.
         
         Args:
@@ -91,7 +91,7 @@ class BasicAnalysisEngine(AnalysisEngine):
                 break
         
         # Multiple task type indicators
-        task_types_found = len(self.classify_task_type(input_text))
+        task_types_found = len(await self.classify_task_type(input_text))
         if task_types_found > 3:
             complexity_score += 3
         elif task_types_found > 2:
@@ -130,7 +130,7 @@ class BasicAnalysisEngine(AnalysisEngine):
         else:
             return ComplexityLevel.TRIVIAL
     
-    def classify_task_type(self, input_text: str) -> List[TaskType]:
+    async def classify_task_type(self, input_text: str) -> List[TaskType]:
         """Classify the types of tasks required to fulfill the request.
         
         Args:
