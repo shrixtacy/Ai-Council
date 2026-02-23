@@ -5,10 +5,6 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# Ensure backend directory is in path so imports work correctly
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # We need to mock AICouncil before importing main, as main.py instantiates it on startup.
 # However, main.py instantiates it inside an async startup_event.
 @pytest.fixture

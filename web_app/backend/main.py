@@ -11,9 +11,6 @@ import json
 import sys
 from pathlib import Path
 
-# Add ai_council to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from ai_council.main import AICouncil
 from ai_council.core.models import ExecutionMode
 
@@ -62,11 +59,16 @@ async def startup_event():
     global ai_council
     try:
         # Load environment variables
+        import os
         from dotenv import load_dotenv
-        load_dotenv()
+        
+        env_path = Path(__file__).parent / ".env"
+        if env_path.exists():
+            load_dotenv(dotenv_path=env_path)
+        else:
+            load_dotenv()
         
         # Set config path
-        import os
         config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
         if config_path.exists():
             os.environ['AI_COUNCIL_CONFIG'] = str(config_path)
