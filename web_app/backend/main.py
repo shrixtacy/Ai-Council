@@ -16,8 +16,17 @@ from ai_council.core.models import ExecutionMode
 
 app = FastAPI(title="AI Council API", version="1.0.0")
 
-# CORS configuration
+# Load environment variables
 import os
+from dotenv import load_dotenv
+
+env_path = Path(__file__).parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+else:
+    load_dotenv()
+
+# CORS configuration
 allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "")
 if allowed_origins_str:
     allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
@@ -58,16 +67,8 @@ async def startup_event():
     """Initialize AI Council on startup."""
     global ai_council
     try:
-        # Load environment variables
         import os
-        from dotenv import load_dotenv
-        
-        env_path = Path(__file__).parent / ".env"
-        if env_path.exists():
-            load_dotenv(dotenv_path=env_path)
-        else:
-            load_dotenv()
-        
+
         # Set config path
         config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
         if config_path.exists():
