@@ -92,10 +92,13 @@ class BaseExecutionAgent(ExecutionAgent):
                 
                 # Apply rate limiting
                 provider = self._get_model_provider(model_id)
-                allowed, wait_time = rate_limit_manager.check_rate_limit(provider)
-                if not allowed:
-                    logger.info(f"Rate limit hit for {provider}, waiting {wait_time:.1f}s")
-                    await asyncio.sleep(wait_time)
+                while True:
+                    allowed, wait_time = rate_limit_manager.check_rate_limit(provider)
+                    if not allowed:
+                        logger.info(f"Rate limit hit for {provider}, waiting {wait_time:.1f}s")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        break
                 
                 # Execute with circuit breaker and timeout
                 response_content = await self._execute_with_protection(subtask, model)

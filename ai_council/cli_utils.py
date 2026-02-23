@@ -64,7 +64,7 @@ class CLIHandler:
             print(f"  Max Parallel: {config.get('max_parallel_executions', 'unknown')}")
             print(f"  Max Cost: ${config.get('max_cost_per_request', 0)}")
 
-    def handle_interactive_mode(self, ai_council: 'AICouncil', default_mode: str):
+    async def handle_interactive_mode(self, ai_council: 'AICouncil', default_mode: str):
         """Runs the interactive REPL loop."""
         print("\n" + "="*60)
         print("AI COUNCIL INTERACTIVE MODE")
@@ -96,12 +96,12 @@ class CLIHandler:
                     # But the requirement was to estimate. The original code used args.mode.
                     # We will assume args.mode validation happened before or defaults are handled.
                     # Here we treat 'default_mode' as the one passed from main args.
-                    estimate = ai_council.estimate_cost(request, ExecutionMode(default_mode))
+                    estimate = await ai_council.estimate_cost(request, ExecutionMode(default_mode))
                     self._print_estimate(estimate)
                     continue
                 elif user_input.startswith('analyze '):
                     request = user_input[8:]
-                    analysis = ai_council.analyze_tradeoffs(request)
+                    analysis = await ai_council.analyze_tradeoffs(request)
                     self._print_analysis(analysis)
                     continue
                 
@@ -110,7 +110,7 @@ class CLIHandler:
                 
                 # Process the request
                 execution_mode = ExecutionMode(default_mode)
-                response = ai_council.process_request(user_input, execution_mode)
+                response = await ai_council.process_request(user_input, execution_mode)
                 
                 self._print_response(response)
                 

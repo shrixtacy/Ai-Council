@@ -18,7 +18,7 @@ class OpenAIAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+    async def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate response."""
         return await self.generate_async(prompt, **kwargs)
     
@@ -71,7 +71,7 @@ class AnthropicAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+    async def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate response."""
         return await self.generate_async(prompt, **kwargs)
     
@@ -123,7 +123,7 @@ class GoogleGeminiAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+    async def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate response."""
         return await self.generate_async(prompt, **kwargs)
     
@@ -174,7 +174,7 @@ class GroqAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+    async def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate response."""
         return await self.generate_async(prompt, **kwargs)
     
@@ -227,7 +227,7 @@ class MistralAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+    async def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate response."""
         return await self.generate_async(prompt, **kwargs)
     
@@ -280,7 +280,7 @@ class XAIAdapter(AIModel):
     def get_model_id(self) -> str:
         return self.model_id
     
-    async def generate_response(self, prompt: str, context: Optional[Dict[str, Any]] = None, **kwargs) -> str:
+    async def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate response."""
         return await self.generate_async(prompt, **kwargs)
     

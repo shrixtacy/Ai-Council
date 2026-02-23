@@ -278,8 +278,7 @@ async def _async_main():
         
         # Handle interactive mode
         if args.interactive:
-            # Assume CLIHandler doesn't properly await in handle_interactive_mode for simplicity
-            print("Interactive mode needs async update.")
+            await cli_handler.handle_interactive_mode(ai_council, args.mode)
             return
         
         # Handle single request
@@ -289,7 +288,7 @@ async def _async_main():
         
         # Handle estimate-only request
         if args.estimate_only:
-            estimate = await ai_council.estimate_cost(args.request, args.mode)
+            estimate = await ai_council.estimate_cost(args.request, ExecutionMode(args.mode))
             print(estimate)
             return
         
