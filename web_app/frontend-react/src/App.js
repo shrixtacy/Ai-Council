@@ -8,6 +8,7 @@ import ErrorBoundary from './components/Errorboundary';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import VerifyOTP from './pages/VerifyOTP';
+import VerifyEmailReminder from './pages/VerifyEmailReminder';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
@@ -70,6 +71,7 @@ function App() {
           element={isAuthenticated ? <Navigate to="/dashboard" /> : <Register />} 
         />
         <Route path="/verify-otp" element={<VerifyOTP />} />
+        <Route path="/verify-email" element={<VerifyEmailReminder />} />
         <Route 
           path="/forgot-password" 
           element={isAuthenticated ? <Navigate to="/dashboard" /> : <ForgotPassword />} 

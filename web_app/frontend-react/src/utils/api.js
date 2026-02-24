@@ -42,8 +42,12 @@ aiAPI.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 errors
-const handle401 = (error) => {
+// Handle 401 and 403 errors
+const handleAuthErrors = (error) => {
+  if (error.response?.status === 403 && error.response?.data?.code === 'EMAIL_NOT_VERIFIED') {
+    window.location.href = '/verify-email';
+    return Promise.reject(error);
+  }
   if (error.response?.status === 401) {
     localStorage.removeItem('ai-council-auth');
     window.location.href = '/login';
@@ -51,8 +55,8 @@ const handle401 = (error) => {
   return Promise.reject(error);
 };
 
-authAPI.interceptors.response.use((response) => response, handle401);
-aiAPI.interceptors.response.use((response) => response, handle401);
+authAPI.interceptors.response.use((response) => response, handleAuthErrors);
+aiAPI.interceptors.response.use((response) => response, handleAuthErrors);
 
 const api = { authAPI, aiAPI };
 export default api;

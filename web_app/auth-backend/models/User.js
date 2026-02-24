@@ -33,6 +33,13 @@ const userSchema = new mongoose.Schema({
   },
   lastLogin: {
     type: Date
+  },
+  otpResendCount: {
+    type: Number,
+    default: 0
+  },
+  otpCreatedAt: {
+    type: Date
   }
 });
 

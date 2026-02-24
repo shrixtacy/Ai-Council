@@ -8,7 +8,7 @@ const Session = require('../models/Session');
 const PasswordReset = require('../models/PasswordReset');
 const RateLimit = require('../models/RateLimit');
 const { sendOTPEmail, sendPasswordResetEmail, sendPasswordResetConfirmation } = require('../utils/email');
-const { protect } = require('../middleware/auth');
+const { protect, protectOptional } = require('../middleware/auth');
 
 // Password strength validation helper
 const validatePasswordStrength = (password) => {
@@ -483,6 +483,49 @@ router.post('/reset-password', [
   } catch (error) {
     console.error('Reset password error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// @route   POST /api/auth/resend-verification
+// @desc    Resend verification email for authenticated but unverified user
+// @access  Private (unverified allowed)
+router.post('/resend-verification', protectOptional, async (req, res) => {
+  try {
+    const user = req.user;
+
+    if (user.isVerified) {
+      return res.status(400).json({ success: false, message: 'Email already verified' });
+    }
+
+    // Check rate limit (max 3 per hour)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    if (user.otpCreatedAt && user.otpCreatedAt > oneHourAgo && user.otpResendCount >= 3) {
+      return res.status(429).json({
+        success: false,
+        message: 'Too many requests. Please try again later.'
+      });
+    }
+
+    // Reset count if last OTP was created more than an hour ago
+    if (!user.otpCreatedAt || user.otpCreatedAt <= oneHourAgo) {
+      user.otpResendCount = 0;
+    }
+
+    // Generate new OTP
+    const otp = generateOTP();
+    const otpExpires = new Date(Date.now() + (process.env.OTP_EXPIRE_MINUTES || 10) * 60 * 1000);
+
+    user.otp = { code: otp, expiresAt: otpExpires };
+    user.otpCreatedAt = new Date();
+    user.otpResendCount = (user.otpResendCount || 0) + 1;
+    await user.save();
+
+    await sendOTPEmail(user.email, otp, user.name);
+
+    res.json({ success: true, message: 'Verification email sent' });
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({ success: false, message: 'Failed to resend verification email' });
   }
 });
 
