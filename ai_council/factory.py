@@ -343,6 +343,13 @@ class AICouncilFactory:
     def _create_execution_agent(self) -> ExecutionAgent:
         """Create the execution agent."""
         self.logger.info("Creating execution agent")
+        if self.config.execution.use_mq:
+            from .execution.mq_agent import MQExecutionAgent
+            self.logger.info(f"Using MQExecutionAgent with Redis URL: {self.config.execution.redis_url}")
+            return MQExecutionAgent(
+                redis_url=self.config.execution.redis_url,
+                timeout_seconds=int(self.config.execution.default_timeout_seconds)
+            )
         return BaseExecutionAgent()
     
     def _create_arbitration_layer(self) -> ArbitrationLayer:
