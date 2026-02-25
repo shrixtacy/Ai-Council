@@ -5,6 +5,7 @@ import json
 import time
 import asyncio
 import logging
+import uuid
 from typing import Dict, Any, Tuple, Union
 from pathlib import Path
 
@@ -26,10 +27,11 @@ class CouncilWorker:
         self.config = load_config(config_path)
         configure_logging(self.config.logging)
         
+        self.worker_id = uuid.uuid4().hex
         self.redis_url = self.config.execution.redis_url
         self.redis_client = None
         self.task_queue = "ai_council:tasks"
-        self.processing_queue = f"{self.task_queue}:processing"
+        self.processing_queue = f"{self.task_queue}:processing:{self.worker_id}"
         
         logger.info("Initializing worker factory and dependencies...")
         self.factory = AICouncilFactory(self.config)
@@ -86,7 +88,11 @@ class CouncilWorker:
         }
         return json.dumps(payload)
 
-    async def process_task(self, payload_json: str):
+    async def process_task(self, payload_json: str) -> bool:
+        if not self.redis_client:
+            logger.error("Redis client is not initialized. Cannot process task.")
+            return False
+
         start_time = time.time()
         subtask_id = "unknown"
         response_key = "unknown"
@@ -114,6 +120,7 @@ class CouncilWorker:
             await self.redis_client.expire(response_key, 300)
             
             logger.info(f"Worker completed subtask {subtask_id} in {time.time() - start_time:.2f}s")
+            return True
             
         except Exception as e:
             logger.error(f"Worker failed processing subtask {subtask_id}: {str(e)}", exc_info=True)
@@ -134,18 +141,42 @@ class CouncilWorker:
                 try:
                     await self.redis_client.rpush(response_key, self._serialize_response(error_resp))
                     await self.redis_client.expire(response_key, 300)
+                    return True
                 except Exception as pub_e:
                     logger.critical(f"Worker failed to publish error for {subtask_id}: {str(pub_e)}")
+                    return False
+            return False
+
+    async def _heartbeat_loop(self):
+        heartbeat_key = f"ai_council:worker:heartbeat:{self.worker_id}"
+        try:
+            while self.running:
+                if self.redis_client:
+                    await self.redis_client.set(heartbeat_key, "1", ex=60)
+                await asyncio.sleep(20)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if self.redis_client:
+                await self.redis_client.delete(heartbeat_key)
 
     async def _recover_stale_tasks(self):
-        """Move tasks from processing_queue back to task_queue."""
-        logger.info("Recovering stale tasks from processing queue...")
+        """Move tasks from orphaned processing_queues back to task_queue."""
+        logger.info("Checking for stale tasks from dead workers...")
         try:
-            while True:
-                payload = await self.redis_client.rpoplpush(self.processing_queue, self.task_queue)
-                if not payload:
-                    break
-                logger.info("Recovered a stale task.")
+            keys = await self.redis_client.keys(f"{self.task_queue}:processing:*")
+            for key in keys:
+                worker_id = key.split(":")[-1]
+                heartbeat_key = f"ai_council:worker:heartbeat:{worker_id}"
+                
+                is_alive = await self.redis_client.exists(heartbeat_key)
+                if not is_alive:
+                    logger.info(f"Recovering tasks from dead worker {worker_id}")
+                    while True:
+                        payload = await self.redis_client.lmove(key, self.task_queue, src="RIGHT", dest="LEFT")
+                        if not payload:
+                            break
+                        logger.info("Recovered a stale task.")
         except Exception as e:
             logger.error(f"Failed to recover stale tasks: {str(e)}")
 
@@ -158,22 +189,28 @@ class CouncilWorker:
         sanitized_netloc = f"***:***@{parsed_url.hostname}:{parsed_url.port}" if parsed_url.password else f"{parsed_url.hostname}:{parsed_url.port}"
         sanitized_url = parsed_url._replace(netloc=sanitized_netloc).geturl()
         
-        logger.info(f"Worker started. Listening on Redis: {sanitized_url}, queue: {self.task_queue}")
+        logger.info(f"Worker {self.worker_id} started. Listening on Redis: {sanitized_url}, queue: {self.task_queue}")
         
         await self._recover_stale_tasks()
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         
         try:
             while self.running:
                 logger.debug("Waiting for next task...")
-                payload = await self.redis_client.brpoplpush(
+                payload = await self.redis_client.blmove(
                     self.task_queue, 
                     self.processing_queue, 
-                    timeout=5
+                    timeout=5,
+                    src="RIGHT",
+                    dest="LEFT"
                 )
                 
                 if payload:
-                    await self.process_task(payload)
-                    await self.redis_client.lrem(self.processing_queue, 1, payload)
+                    success = await self.process_task(payload)
+                    if success:
+                        await self.redis_client.lrem(self.processing_queue, 1, payload)
+                    else:
+                        logger.warning(f"Task processing failed to publish, leaving in queue: {payload}")
                     
         except asyncio.CancelledError:
             logger.info("Worker shutdown requested.")
@@ -181,6 +218,12 @@ class CouncilWorker:
             logger.error(f"Worker encountered fatal error: {str(e)}", exc_info=True)
         finally:
             self.running = False
+            if heartbeat_task:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
             if self.redis_client:
                 await self.redis_client.close()
             logger.info("Worker stopped.")

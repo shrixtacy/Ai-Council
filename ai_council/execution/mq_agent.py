@@ -124,8 +124,8 @@ class MQExecutionAgent(ExecutionAgent):
             )
             
             return AgentResponse(
-                subtask_id=data.get("subtask_id", ""),
-                model_used=data.get("model_used", ""),
+                subtask_id=data.get("subtask_id", "") or "unknown_subtask",
+                model_used=data.get("model_used", "") or "unknown_model",
                 content=data.get("content", ""),
                 self_assessment=self_assessment,
                 success=data.get("success", True),
