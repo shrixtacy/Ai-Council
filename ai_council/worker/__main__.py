@@ -25,7 +25,12 @@ class CouncilWorker:
             config_path = Path(config_path)
             
         self.config = load_config(config_path)
-        configure_logging(self.config.logging)
+        configure_logging(
+            level=self.config.logging.level,
+            format_json=self.config.logging.format_json,
+            include_timestamp=self.config.logging.include_timestamp,
+            include_caller=self.config.logging.include_caller,
+        )
         
         self.worker_id = uuid.uuid4().hex
         self.redis_url = self.config.execution.redis_url
