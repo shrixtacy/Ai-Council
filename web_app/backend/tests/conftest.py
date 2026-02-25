@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 # However, main.py instantiates it inside an async startup_event.
 @pytest.fixture
 def mock_ai_council():
-    patcher = patch("web_app.backend.main.AICouncil")
+    patcher = patch("main.AICouncil")
     mock_class = patcher.start()
     mock_instance = MagicMock()
     mock_class.return_value = mock_instance
@@ -22,7 +22,7 @@ def mock_ai_council():
 
 @pytest.fixture
 def test_client(mock_ai_council):
-    from web_app.backend.main import app
+    from main import app
     
     with TestClient(app) as client:
         yield client

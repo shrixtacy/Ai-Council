@@ -1,70 +1,138 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Send, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import OrchestrationVisualizer from '../components/OrchestrationVisualizer';
+import { aiAPI, authAPI } from '../utils/api';
+
+const MODES = [
+  { value: 'fast', label: 'Fast' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'best_quality', label: 'Best Quality' },
+];
 
 const Chat = () => {
   const navigate = useNavigate();
+  const latestRequestIdRef = useRef(0);
+
   const [query, setQuery] = useState('');
+  const [mode, setMode] = useState('balanced');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [orchestrationData, setOrchestrationData] = useState(null);
 
+  const buildSubtasks = (responseData) => {
+    const steps = Array.isArray(responseData.execution_path)
+      ? responseData.execution_path
+      : [];
+
+    return steps.map((step, idx) => ({
+      id: `${Date.now()}-${idx}`,
+      content: typeof step === 'string' ? step : JSON.stringify(step),
+      taskType: 'orchestration_step',
+      assignedModel: responseData.models_used?.[0] || 'AI Council',
+      status: 'completed',
+      confidence: responseData.confidence || 0,
+      startTime: new Date(),
+      endTime: new Date(),
+    }));
+  };
+
+  const persistChatHistory = async (requestQuery, data) => {
+    try {
+      await authAPI.post('/chat/save', {
+        query: requestQuery,
+        response: data.content,
+        executionMode: mode,
+        modelsUsed: data.models_used || [],
+        confidence: data.confidence || 0,
+        cost: data.cost || 0,
+        executionTime: data.execution_time || 0,
+        orchestrationData: {
+          executionPath: data.execution_path || [],
+          arbitrationDecisions: data.arbitration_decisions || [],
+          synthesisNotes: data.synthesis_notes || [],
+        },
+      });
+    } catch (_err) {
+      // Non-blocking for UX; user still gets AI response even if history persistence fails.
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!query.trim()) return;
+    if (!query.trim() || loading) return;
 
-    const userMessage = { role: 'user', content: query };
-    setMessages([...messages, userMessage]);
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
+
+    const requestQuery = query;
+    const userMessage = { role: 'user', content: requestQuery, mode };
+
+    setMessages((prev) => [...prev, userMessage]);
     setQuery('');
     setLoading(true);
 
-    // Simulate orchestration data (replace with actual API call)
-    setTimeout(() => {
-      const mockOrchestration = {
-        subtasks: [
-          {
-            id: '1',
-            content: 'Analyze user intent',
-            taskType: 'reasoning',
-            assignedModel: 'gpt-4',
-            status: 'completed',
-            confidence: 0.95,
-            startTime: new Date(),
-            endTime: new Date(Date.now() + 1000)
-          },
-          {
-            id: '2',
-            content: 'Generate response',
-            taskType: 'creative_output',
-            assignedModel: 'claude-3',
-            status: 'completed',
-            confidence: 0.92,
-            startTime: new Date(),
-            endTime: new Date(Date.now() + 2000)
-          }
-        ],
-        arbitrationDecisions: ['Selected GPT-4 for reasoning based on confidence score'],
-        synthesisNotes: ['Combined outputs from multiple models for comprehensive response']
-      };
+    try {
+      const { data } = await aiAPI.post('/process', {
+        query: requestQuery,
+        mode,
+      });
 
-      setOrchestrationData(mockOrchestration);
-      
+      // Race guard: ignore stale responses from earlier requests.
+      if (requestId !== latestRequestIdRef.current) return;
+
+      if (!data?.success) {
+        throw new Error(data?.error_message || 'AI request failed');
+      }
+
+      setOrchestrationData({
+        subtasks: buildSubtasks(data),
+        arbitrationDecisions: data.arbitration_decisions || [],
+        synthesisNotes: data.synthesis_notes || [],
+      });
+
       const aiMessage = {
         role: 'assistant',
-        content: 'This is a demo response. Connect to the AI backend to get real responses with live orchestration!'
+        content: data.content,
+        metadata: {
+          confidence: data.confidence,
+          modelsUsed: data.models_used || [],
+          executionTime: data.execution_time || 0,
+          cost: data.cost || 0,
+        },
       };
-      
-      setMessages(prev => [...prev, aiMessage]);
-      setLoading(false);
-    }, 2000);
+
+      setMessages((prev) => [...prev, aiMessage]);
+      await persistChatHistory(requestQuery, data);
+    } catch (error) {
+      if (requestId !== latestRequestIdRef.current) return;
+      const message =
+        error.response?.data?.detail ||
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to process request. Please try again.';
+
+      toast.error(message);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: 'Sorry, something went wrong while processing your request.',
+          isError: true,
+        },
+      ]);
+    } finally {
+      if (requestId === latestRequestIdRef.current) {
+        setLoading(false);
+      }
+    }
   };
 
   return (
     <div className="min-h-screen p-6">
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
         <div className="bg-white rounded-2xl shadow-lg p-4 mb-6 flex items-center gap-4">
           <button
             onClick={() => navigate('/dashboard')}
@@ -75,13 +143,8 @@ const Chat = () => {
           <h1 className="text-2xl font-bold font-display tracking-tight text-gray-800">AI Chat</h1>
         </div>
 
-        {/* Orchestration Visualizer */}
-        <OrchestrationVisualizer 
-          orchestrationData={orchestrationData}
-          isProcessing={loading}
-        />
+        <OrchestrationVisualizer orchestrationData={orchestrationData} isProcessing={loading} />
 
-        {/* Chat Messages */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 min-h-[400px] max-h-[500px] overflow-y-auto">
           {messages.length === 0 ? (
             <div className="text-center text-gray-500 mt-20">
@@ -98,13 +161,20 @@ const Chat = () => {
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[70%] p-4 rounded-2xl ${
+                    className={`max-w-[75%] p-4 rounded-2xl ${
                       msg.role === 'user'
                         ? 'bg-gradient-to-r from-primary-600 to-primary-700 text-white'
-                        : 'bg-gray-100 text-gray-800'
+                        : msg.isError
+                          ? 'bg-red-50 text-red-700 border border-red-200'
+                          : 'bg-gray-100 text-gray-800'
                     }`}
                   >
-                    {msg.content}
+                    <div>{msg.content}</div>
+                    {msg.role === 'assistant' && msg.metadata && (
+                      <div className="mt-2 text-xs opacity-70">
+                        {msg.metadata.modelsUsed?.join(', ') || 'AI Council'} • {msg.metadata.executionTime?.toFixed?.(2) || msg.metadata.executionTime}s • ${Number(msg.metadata.cost || 0).toFixed(4)}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               ))}
@@ -123,8 +193,25 @@ const Chat = () => {
           )}
         </div>
 
-        {/* Input */}
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-lg p-4">
+        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-lg p-4 space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            {MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setMode(m.value)}
+                disabled={loading}
+                className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                  mode === m.value
+                    ? 'bg-primary-600 text-white border-primary-600'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                } disabled:opacity-50`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
           <div className="flex gap-4">
             <input
               type="text"

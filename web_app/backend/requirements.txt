@@ -5,6 +5,7 @@ python-multipart>=0.0.6
 pydantic>=2.0.0
 python-dotenv>=1.0.0
 httpx>=0.24.0
+slowapi>=0.1.9
 
 # Logging
 structlog>=25.5.0
