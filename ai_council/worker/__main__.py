@@ -5,7 +5,8 @@ import json
 import time
 import asyncio
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Tuple, Union
+from pathlib import Path
 
 import redis.asyncio as redis
 
@@ -18,13 +19,17 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = get_logger("ai_council.worker")
 
 class CouncilWorker:
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: Union[str, Path, None] = None):
+        if isinstance(config_path, str):
+            config_path = Path(config_path)
+            
         self.config = load_config(config_path)
         configure_logging(self.config.logging)
         
         self.redis_url = self.config.execution.redis_url
         self.redis_client = None
         self.task_queue = "ai_council:tasks"
+        self.processing_queue = f"{self.task_queue}:processing"
         
         logger.info("Initializing worker factory and dependencies...")
         self.factory = AICouncilFactory(self.config)
@@ -38,7 +43,7 @@ class CouncilWorker:
         self.execution_agent = BaseExecutionAgent()
         self.running = False
 
-    async def _deserialize_task(self, data: Dict[str, Any]) -> tuple[Subtask, str]:
+    async def _deserialize_task(self, data: Dict[str, Any]) -> Tuple[Subtask, str]:
         task_type_val = data.get("task_type")
         priority_val = data.get("priority", Priority.MEDIUM.value)
         risk_level_val = data.get("risk_level", RiskLevel.LOW.value)
@@ -132,19 +137,43 @@ class CouncilWorker:
                 except Exception as pub_e:
                     logger.critical(f"Worker failed to publish error for {subtask_id}: {str(pub_e)}")
 
+    async def _recover_stale_tasks(self):
+        """Move tasks from processing_queue back to task_queue."""
+        logger.info("Recovering stale tasks from processing queue...")
+        try:
+            while True:
+                payload = await self.redis_client.rpoplpush(self.processing_queue, self.task_queue)
+                if not payload:
+                    break
+                logger.info("Recovered a stale task.")
+        except Exception as e:
+            logger.error(f"Failed to recover stale tasks: {str(e)}")
+
     async def run(self):
         self.running = True
         self.redis_client = redis.from_url(self.redis_url, decode_responses=True)
-        logger.info(f"Worker started. Listening on Redis: {self.redis_url}, queue: {self.task_queue}")
+        
+        from urllib.parse import urlparse
+        parsed_url = urlparse(self.redis_url)
+        sanitized_netloc = f"***:***@{parsed_url.hostname}:{parsed_url.port}" if parsed_url.password else f"{parsed_url.hostname}:{parsed_url.port}"
+        sanitized_url = parsed_url._replace(netloc=sanitized_netloc).geturl()
+        
+        logger.info(f"Worker started. Listening on Redis: {sanitized_url}, queue: {self.task_queue}")
+        
+        await self._recover_stale_tasks()
         
         try:
             while self.running:
                 logger.debug("Waiting for next task...")
-                result = await self.redis_client.blpop(self.task_queue, timeout=5)
+                payload = await self.redis_client.brpoplpush(
+                    self.task_queue, 
+                    self.processing_queue, 
+                    timeout=5
+                )
                 
-                if result:
-                    _, payload = result
+                if payload:
                     await self.process_task(payload)
+                    await self.redis_client.lrem(self.processing_queue, 1, payload)
                     
         except asyncio.CancelledError:
             logger.info("Worker shutdown requested.")

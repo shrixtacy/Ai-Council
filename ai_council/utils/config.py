@@ -99,6 +99,11 @@ class ExecutionConfig:
     use_mq: bool = False
     redis_url: str = "redis://localhost:6379"
 
+    def __post_init__(self):
+        if self.use_mq:
+            if not self.redis_url or not (self.redis_url.startswith("redis://") or self.redis_url.startswith("rediss://")):
+                raise ValueError("redis_url must start with 'redis://' or 'rediss://' when use_mq is True")
+
 
 @dataclass
 class CostConfig:

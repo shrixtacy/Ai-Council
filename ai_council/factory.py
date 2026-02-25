@@ -345,10 +345,22 @@ class AICouncilFactory:
         self.logger.info("Creating execution agent")
         if self.config.execution.use_mq:
             from .execution.mq_agent import MQExecutionAgent
-            self.logger.info(f"Using MQExecutionAgent with Redis URL: {self.config.execution.redis_url}")
+            import math
+            from urllib.parse import urlparse
+            
+            parsed_url = urlparse(self.config.execution.redis_url)
+            sanitized_netloc = f"***:***@{parsed_url.hostname}:{parsed_url.port}" if parsed_url.password else f"{parsed_url.hostname}:{parsed_url.port}"
+            sanitized_url = parsed_url._replace(netloc=sanitized_netloc).geturl()
+            
+            self.logger.info(f"Using MQExecutionAgent with Redis URL: {sanitized_url}")
+            
+            raw_timeout = self.config.execution.default_timeout_seconds
+            safe_timeout = int(math.ceil(raw_timeout)) if raw_timeout and raw_timeout > 0 else 1
+            safe_timeout = max(1, safe_timeout)
+
             return MQExecutionAgent(
                 redis_url=self.config.execution.redis_url,
-                timeout_seconds=int(self.config.execution.default_timeout_seconds)
+                timeout_seconds=safe_timeout
             )
         return BaseExecutionAgent()
     

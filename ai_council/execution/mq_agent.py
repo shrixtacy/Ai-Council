@@ -31,17 +31,21 @@ class MQExecutionAgent(ExecutionAgent):
     def _ensure_connection(self):
         """Create a Redis connection pool if not already established."""
         if not self.redis_client:
+            from urllib.parse import urlparse
             self.redis_client = redis.from_url(self.redis_url, decode_responses=True)
-            logger.info(f"MQExecutionAgent initialized with Redis at {self.redis_url}")
+            parsed_url = urlparse(self.redis_url)
+            sanitized_netloc = f"***:***@{parsed_url.hostname}:{parsed_url.port}" if parsed_url.password else f"{parsed_url.hostname}:{parsed_url.port}"
+            sanitized_url = parsed_url._replace(netloc=sanitized_netloc).geturl()
+            logger.info(f"MQExecutionAgent initialized with Redis at {sanitized_url}")
 
     async def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
         start_time = time.time()
-        model_id = model.get_model_id()
-        response_key = f"ai_council:results:{subtask.id}"
-        
-        payload = self._serialize_task(subtask, model_id)
         
         try:
+            model_id = model.get_model_id()
+            response_key = f"ai_council:results:{subtask.id}"
+            payload = self._serialize_task(subtask, model_id)
+            
             self._ensure_connection()
             
             logger.info(f"Pushing subtask {subtask.id} to MQ for model {model_id}")
@@ -57,6 +61,7 @@ class MQExecutionAgent(ExecutionAgent):
             return self._deserialize_response(response_json, start_time)
             
         except Exception as e:
+            failed_model_id = model_id if 'model_id' in locals() else "unknown"
             logger.error(f"MQ Execution failed for subtask {subtask.id}: {str(e)}")
             
             failure_event = create_failure_event(
@@ -64,21 +69,21 @@ class MQExecutionAgent(ExecutionAgent):
                 component="mq_execution_agent",
                 error_message=str(e),
                 subtask_id=subtask.id,
-                model_id=model_id,
+                model_id=failed_model_id,
                 severity=RiskLevel.HIGH
             )
             resilience_manager.handle_failure(failure_event)
             
             return AgentResponse(
                 subtask_id=subtask.id,
-                model_used=model_id,
+                model_used=failed_model_id,
                 content="",
                 success=False,
                 error_message=f"MQ Execution failed: {str(e)}",
                 self_assessment=SelfAssessment(
                     confidence_score=0.0,
                     risk_level=RiskLevel.CRITICAL,
-                    model_used=model_id,
+                    model_used=failed_model_id,
                     execution_time=time.time() - start_time
                 )
             )
@@ -103,10 +108,15 @@ class MQExecutionAgent(ExecutionAgent):
             sa_data = data.get("self_assessment", {})
             risk_level_str = sa_data.get("risk_level", RiskLevel.LOW.value)
             
+            try:
+                risk_level = RiskLevel(risk_level_str) if isinstance(risk_level_str, str) else risk_level_str
+            except ValueError:
+                risk_level = RiskLevel.LOW
+                
             self_assessment = SelfAssessment(
                 confidence_score=sa_data.get("confidence_score", 0.0),
                 assumptions=sa_data.get("assumptions", []),
-                risk_level=RiskLevel(risk_level_str) if isinstance(risk_level_str, str) else risk_level_str,
+                risk_level=risk_level,
                 estimated_cost=sa_data.get("estimated_cost", 0.0),
                 token_usage=sa_data.get("token_usage", 0),
                 execution_time=sa_data.get("execution_time", time.time() - start_time),
