@@ -15,6 +15,7 @@ const MODES = [
 const Chat = () => {
   const navigate = useNavigate();
   const latestRequestIdRef = useRef(0);
+  const messagesEndRef = useRef(null);
 
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState('balanced');
@@ -55,10 +56,18 @@ const Chat = () => {
           synthesisNotes: data.synthesis_notes || [],
         },
       });
-    } catch (_err) {
+    } catch (err) {
       // Non-blocking for UX; user still gets AI response even if history persistence fails.
+      console.warn('Failed to persist chat history', {
+        requestQuery,
+        error: String(err?.message || err),
+      });
     }
   };
+
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -105,7 +114,7 @@ const Chat = () => {
       };
 
       setMessages((prev) => [...prev, aiMessage]);
-      await persistChatHistory(requestQuery, data);
+      persistChatHistory(requestQuery, data);
     } catch (error) {
       if (requestId !== latestRequestIdRef.current) return;
       const message =
@@ -189,6 +198,7 @@ const Chat = () => {
                   </div>
                 </div>
               )}
+              <div ref={messagesEndRef} />
             </div>
           )}
         </div>

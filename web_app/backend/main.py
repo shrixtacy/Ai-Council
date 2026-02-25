@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import inspect
 import json
 import os
@@ -40,19 +41,21 @@ class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
 
-        # slowapi does not always expose this consistently, so keep sane defaults.
-        limit = 100
-        remaining = 100
-        reset = int(time.time()) + 900
+        if hasattr(request.state, "rate_limit"):
+            rate_limit = request.state.rate_limit
+            rate_limit_dict = rate_limit if isinstance(rate_limit, dict) else getattr(rate_limit, "__dict__", {})
 
-        if hasattr(request.state, "rate_limit") and isinstance(request.state.rate_limit, dict):
-            limit = request.state.rate_limit.get("limit", limit)
-            remaining = request.state.rate_limit.get("remaining", remaining)
-            reset = request.state.rate_limit.get("reset", reset)
+            limit = rate_limit_dict.get("limit")
+            remaining = rate_limit_dict.get("remaining")
+            reset = rate_limit_dict.get("reset")
 
-        response.headers["X-RateLimit-Limit"] = str(limit)
-        response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(reset)
+            if isinstance(limit, int):
+                response.headers["X-RateLimit-Limit"] = str(limit)
+            if isinstance(remaining, int):
+                response.headers["X-RateLimit-Remaining"] = str(remaining)
+            if isinstance(reset, int):
+                response.headers["X-RateLimit-Reset"] = str(reset)
+
         return response
 
 
@@ -120,21 +123,34 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     """Custom 429 response with retry hints."""
     retry_after = 900
     try:
-        # slowapi detail looks like: "100 per 15 minute"
-        parts = str(exc.detail).split(" ")
-        retry_after = int(parts[-1]) if parts and parts[-1].isdigit() else retry_after
-    except Exception:
-        pass
+        # slowapi detail often looks like: "100 per 15 minute"
+        detail_text = exc.detail
+        if isinstance(detail_text, str):
+            parts = detail_text.split(" ")
+            retry_after = int(parts[-1]) if parts and parts[-1].isdigit() else retry_after
+    except (ValueError, IndexError, TypeError) as error:
+        logging.getLogger(__name__).debug(
+            "Could not parse rate limit detail for retry_after fallback: detail=%s error=%s",
+            exc.detail,
+            error,
+        )
+        retry_after = 900
+
+    headers = {
+        "Retry-After": str(retry_after),
+        "X-RateLimit-Limit": "100",
+        "X-RateLimit-Remaining": "0",
+        "X-RateLimit-Reset": str(int(time.time()) + retry_after),
+    }
+    request_origin = request.headers.get("origin")
+    if request_origin:
+        headers["Access-Control-Allow-Origin"] = request_origin
+        headers["Access-Control-Allow-Credentials"] = "true"
 
     return JSONResponse(
         status_code=429,
         content={"success": False, "message": "Too many requests", "retryAfter": retry_after},
-        headers={
-            "Retry-After": str(retry_after),
-            "X-RateLimit-Limit": "100",
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": str(int(time.time()) + retry_after),
-        },
+        headers=headers,
     )
 
 
@@ -260,7 +276,8 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception as exc:
-        await websocket.send_json({"type": "error", "message": str(exc)})
+        logging.getLogger(__name__).exception("Unexpected websocket error")
+        await websocket.send_json({"type": "error", "message": "Internal server error"})
 
 
 if __name__ == "__main__":
