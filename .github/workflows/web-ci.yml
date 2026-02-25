@@ -59,7 +59,9 @@ jobs:
           cache-dependency-path: "./web_app/frontend-react/package-lock.json"
 
       - name: Install dependencies
-        run: npm ci || npm install --legacy-peer-deps
+        run: |
+          npm config set registry https://registry.npmjs.org
+          npm ci || (npm install --legacy-peer-deps --prefer-offline --no-fund --no-audit)
 
       - name: Run React Tests
         run: npm test -- --watchAll=false
