@@ -486,6 +486,39 @@ router.post('/reset-password', [
   }
 });
 
+// @route   POST /api/auth/refresh-token
+// @desc    Refresh JWT token
+// @access  Private
+router.post('/refresh-token', protect, async (req, res) => {
+  try {
+    const oldToken = req.headers.authorization.split(' ')[1];
+
+    // Deactivate old session
+    const oldSession = await Session.findOneAndUpdate({ token: oldToken, isActive: true }, { isActive: false }).exec();
+    if (!oldSession) {
+      return res.status(401).json({ success: false, message: 'Session not found or already inactive' });
+    }
+
+    // Generate new token
+    const newToken = generateToken(req.user._id);
+
+    // Create new session (TTL matches JWT_EXPIRE of 7 days)
+    const sessionTTL = 7 * 24 * 60 * 60 * 1000;
+    await Session.create({
+      userId: req.user._id,
+      token: newToken,
+      expiresAt: new Date(Date.now() + sessionTTL),
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+
+    res.json({ success: true, token: newToken });
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // @route   POST /api/auth/resend-verification
 // @desc    Resend verification email for authenticated but unverified user
 // @access  Private (unverified allowed)

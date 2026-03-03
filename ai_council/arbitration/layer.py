@@ -1,6 +1,6 @@
 """Implementation of the ArbitrationLayer for conflict resolution between agent responses."""
 
-import logging
+from ai_council.core.logger import get_logger
 from typing import List, Dict, Set, Optional
 from datetime import datetime
 
@@ -8,7 +8,7 @@ from ..core.interfaces import ArbitrationLayer, Conflict, Resolution, Arbitratio
 from ..core.models import AgentResponse, RiskLevel
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ConcreteArbitrationLayer(ArbitrationLayer):
@@ -33,7 +33,7 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         """
         self.confidence_threshold = confidence_threshold
         self.quality_weight = quality_weight
-        logger.info(f"ArbitrationLayer initialized with confidence_threshold={confidence_threshold}, quality_weight={quality_weight}")
+        logger.info("ArbitrationLayer initialized", extra={"confidence_threshold": confidence_threshold, "quality_weight": quality_weight})
     
     async def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
         """
@@ -53,17 +53,17 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
             # Single response - validate quality but no conflicts to resolve
             response = responses[0]
             if self._validate_response_quality(response):
-                logger.info(f"Single response validated successfully: {response.subtask_id}")
+                logger.info("Single response validated successfully", extra={"subtask_id": response.subtask_id})
                 return ArbitrationResult(validated_responses=[response], conflicts_resolved=[])
             else:
-                logger.warning(f"Single response failed quality validation: {response.subtask_id}")
+                logger.warning("Single response failed quality validation", extra={"subtask_id": response.subtask_id})
                 return ArbitrationResult(validated_responses=[], conflicts_resolved=[])
         
-        logger.info(f"Starting arbitration for {len(responses)} responses")
+        logger.info("Starting arbitration for", extra={"count": len(responses)})
         
         # Step 1: Detect conflicts between responses
         conflicts = await self.detect_conflicts(responses)
-        logger.info(f"Detected {len(conflicts)} conflicts")
+        logger.info("Detected", extra={"count": len(conflicts)})
         
         # Step 2: Resolve each conflict
         resolutions = []
@@ -71,14 +71,14 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
             try:
                 resolution = await self.resolve_contradiction(conflict)
                 resolutions.append(resolution)
-                logger.info(f"Resolved conflict: {conflict.conflict_type}")
+                logger.info("Resolved conflict", extra={"conflict_type": conflict.conflict_type})
             except Exception as e:
-                logger.error(f"Failed to resolve conflict {conflict.conflict_type}: {e}")
+                logger.error("Failed to resolve conflict", extra={"conflict_type": conflict.conflict_type, "error": str(e)})
         
         # Step 3: Build validated response list based on resolutions
         validated_responses = self._build_validated_responses(responses, conflicts, resolutions)
         
-        logger.info(f"Arbitration complete: {len(validated_responses)} validated responses, {len(resolutions)} conflicts resolved")
+        logger.info("Arbitration complete", extra={"validated_responses": len(validated_responses), "resolutions": len(resolutions)})
         return ArbitrationResult(validated_responses=validated_responses, conflicts_resolved=resolutions)
     
     async def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
@@ -125,7 +125,7 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
             return await self._resolve_quality_conflict(conflict)
         else:
             # Default resolution: choose first response with warning
-            logger.warning(f"Unknown conflict type: {conflict.conflict_type}, defaulting to first response")
+            logger.warning("Unknown conflict type", extra={"conflict_type": conflict.conflict_type})
             return Resolution(
                 chosen_response_id=conflict.response_ids[0],
                 reasoning=f"Unknown conflict type '{conflict.conflict_type}', defaulted to first response",
@@ -376,7 +376,7 @@ class NoOpArbitrationLayer(ArbitrationLayer):
             ArbitrationResult: All successful responses with no conflicts resolved
         """
         validated_responses = [r for r in responses if r.success]
-        logger.info(f"NoOpArbitrationLayer: passing through {len(validated_responses)} successful responses")
+        logger.info("NoOpArbitrationLayer: passing through", extra={"count": len(validated_responses)})
         
         return ArbitrationResult(
             validated_responses=validated_responses,

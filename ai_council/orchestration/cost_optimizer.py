@@ -1,6 +1,5 @@
 """Cost optimization logic for AI Council execution modes and model selection."""
 
-import logging
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
@@ -10,9 +9,10 @@ from ..core.models import (
     Subtask, ExecutionMode, TaskType, RiskLevel, Priority,
     ModelCapabilities, CostProfile, PerformanceMetrics
 )
+from ..core.logger import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -84,7 +84,7 @@ class CostOptimizer:
         
         # Check cache first
         if cache_key in self._optimization_cache:
-            logger.debug(f"Using cached optimization result for {cache_key}")
+            logger.debug("Using cached optimization result", extra={"cache_key": cache_key})
             return self._optimization_cache[cache_key]
         
         # Get optimization strategy based on execution mode
@@ -99,7 +99,7 @@ class CostOptimizer:
                 )
                 model_scores.append((model_id, score_result))
             except Exception as e:
-                logger.warning(f"Failed to score model {model_id}: {str(e)}")
+                logger.warning("Failed to score model", extra={"model_id": model_id, "error": str(e)})
                 continue
         
         if not model_scores:
@@ -125,7 +125,7 @@ class CostOptimizer:
         # Cache the result
         self._optimization_cache[cache_key] = result
         
-        logger.info(f"Optimized model selection: {best_model_id} for {strategy.value}")
+        logger.info("Optimized model selection", extra={"model_id": best_model_id, "strategy": strategy.value})
         return result
     
     def estimate_execution_cost(
@@ -180,7 +180,7 @@ class CostOptimizer:
                     time_costs[model_id] = time_cost
                 
             except Exception as e:
-                logger.warning(f"Failed to estimate cost for subtask {subtask.id}: {str(e)}")
+                logger.warning("Failed to estimate cost for subtask", extra={"subtask_id": subtask.id, "error": str(e)})
                 # Add default cost estimate
                 total_cost += 0.01
         
@@ -229,7 +229,7 @@ class CostOptimizer:
                 })
                 
             except Exception as e:
-                logger.warning(f"Failed to analyze model {model_id}: {str(e)}")
+                logger.warning("Failed to analyze model", extra={"model_id": model_id, "error": str(e)})
                 continue
         
         # Sort by efficiency ratio (descending)
@@ -257,7 +257,7 @@ class CostOptimizer:
         if len(self._performance_history[model_id]) > 100:
             self._performance_history[model_id] = self._performance_history[model_id][-100:]
         
-        logger.debug(f"Updated performance history for {model_id}: efficiency={efficiency:.4f}")
+        logger.debug("Updated performance history", extra={"model_id": model_id, "efficiency": efficiency})
     
     def _get_optimization_strategy(self, execution_mode: ExecutionMode) -> OptimizationStrategy:
         """Get optimization strategy based on execution mode."""

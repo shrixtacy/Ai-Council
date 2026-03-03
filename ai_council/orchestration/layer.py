@@ -1,6 +1,6 @@
 """Implementation of the OrchestrationLayer for main request processing pipeline."""
 
-import logging
+from ai_council.core.logger import get_logger
 import asyncio
 import time
 from typing import List, Dict, Optional, Any, Callable
@@ -31,7 +31,7 @@ from ..core.error_handling import create_error_response
 from .cost_optimizer import CostOptimizer
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ConcreteOrchestrationLayer(OrchestrationLayer):
@@ -172,7 +172,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         try:
             return await self.estimate_cost_and_time(task)
         except Exception as e:
-            logger.warning(f"Cost estimation failed: {str(e)}")
+            logger.warning("Cost estimation failed", extra={"error": str(e)})
             return None
     
     async def _stage_decompose_task(self, task: Task) -> List[Subtask]:
@@ -188,7 +188,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         try:
             return await self._decompose_task_protected(task)
         except Exception as e:
-            logger.error(f"Task decomposition failed: {str(e)}")
+            logger.error("Task decomposition failed", extra={"error": str(e)})
             # Fallback to single subtask
             return [await self._create_fallback_subtask(task)]
     
@@ -205,7 +205,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         try:
             return await self.model_context_protocol.determine_parallelism(subtasks)
         except Exception as e:
-            logger.warning(f"Execution planning failed: {str(e)}")
+            logger.warning("Execution planning failed", extra={"error": str(e)})
             return self._create_sequential_plan(subtasks)
     
     async def _stage_execute_subtasks(
@@ -252,7 +252,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         success_rate = sum(1 for resp in agent_responses if resp.success) / len(agent_responses)
         
         if success_rate < self.partial_failure_threshold:
-            logger.warning(f"Partial failure detected: {success_rate:.1%} success rate")
+            logger.warning("Partial failure detected", extra={"success_rate": round(success_rate, 3)})
             
             # Record partial failure event
             failure_event = create_failure_event(
@@ -295,7 +295,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             arbitration_result = await self._arbitrate_with_protection(responses)
             return arbitration_result.validated_responses
         except Exception as e:
-            logger.warning(f"Arbitration failed: {str(e)}")
+            logger.warning("Arbitration failed", extra={"error": str(e)})
             # Fallback: use first successful response
             return responses[:1]
     
@@ -315,7 +315,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         try:
             return await self._synthesize_with_protection(validated_responses)
         except Exception as e:
-            logger.error(f"Synthesis failed: {str(e)}")
+            logger.error("Synthesis failed", extra={"error": str(e)})
             # Guard: Handle empty validated_responses to avoid IndexError
             if not validated_responses:
                 logger.warning("No validated responses available for synthesis fallback")
@@ -379,7 +379,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         execution_metadata = ExecutionMetadata()
         
         try:
-            logger.info(f"Processing request in {execution_mode.value} mode: {user_input[:100]}...")
+            logger.info("Processing request", extra={"mode": execution_mode.value, "input_sample": user_input[:100]})
             
             # Stage 1: Analysis and Task Creation
             task = await self._stage_analyze_and_create_task(user_input, execution_mode)
@@ -389,12 +389,12 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             if execution_mode != ExecutionMode.FAST:
                 cost_estimate = await self._stage_estimate_cost(task)
                 if cost_estimate:
-                    logger.info(f"Estimated cost: ${cost_estimate.estimated_cost:.4f}, time: {cost_estimate.estimated_time:.1f}s")
+                    logger.info("Estimated cost", extra={"cost": cost_estimate.estimated_cost, "time": cost_estimate.estimated_time})
             
             # Stage 3: Task Decomposition
             subtasks = await self._stage_decompose_task(task)
             execution_metadata.execution_path.append("task_decomposition")
-            logger.info(f"Decomposed into {len(subtasks)} subtasks")
+            logger.info("Decomposed into", extra={"count": len(subtasks)})
             
             # Stage 4: Execution Planning
             execution_plan = await self._stage_plan_execution(subtasks)
@@ -441,11 +441,11 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             execution_metadata.total_execution_time = time.time() - start_time
             final_response = await self._stage_attach_metadata(final_response, execution_metadata)
             
-            logger.info(f"Request processed successfully in {execution_metadata.total_execution_time:.2f}s")
+            logger.info("Request processed successfully", extra={"execution_time": round(execution_metadata.total_execution_time, 2)})
             return final_response
             
         except TimeoutError as e:
-            logger.error(f"Request processing timed out: {str(e)}")
+            logger.error("Request processing timed out", extra={"error": str(e)})
             raise ModelTimeoutError(f"Request processing timed out: {str(e)}", original_error=e)
             
         except AICouncilError:
@@ -453,7 +453,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             raise
             
         except Exception as e:
-            logger.error(f"Request processing failed: {str(e)}")
+            logger.error("Request processing failed", extra={"error": str(e)})
             execution_time = time.time() - start_time
             
             # Record system failure
@@ -609,7 +609,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             group_success_rate = sum(1 for resp in group_responses if resp.success) / len(group_responses)
             if group_success_rate < 0.5:
                 failed_groups += 1
-                logger.warning(f"Group {group_index} had low success rate: {group_success_rate:.1%}")
+                logger.warning("Group had low success rate", extra={"group_index": group_index, "success_rate": group_success_rate})
             
             # Check if we should continue or fail fast
             if failed_groups / (group_index + 1) > 0.5 and execution_mode == ExecutionMode.FAST:
@@ -640,7 +640,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             health = resilience_manager.health_check()
             if health["overall_health"] == "degraded" and execution_mode == ExecutionMode.FAST:
                 if subtask.priority.value in ["low", "medium"]:
-                    logger.info(f"Skipping subtask {subtask.id} due to degraded system health")
+                    logger.info("Skipping subtask", extra={"id": subtask.id})
                     return AgentResponse(
                         subtask_id=subtask.id,
                         model_used="skipped",
@@ -657,7 +657,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             ]
             
             if not available_models:
-                logger.error(f"No models available for task type {subtask.task_type}")
+                logger.error("No models available for task type", extra={"task_type": subtask.task_type})
                 return AgentResponse(
                     subtask_id=subtask.id,
                     model_used="none_available",
@@ -671,7 +671,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 subtask, execution_mode, available_models
             )
             
-            logger.info(f"Cost-optimized selection: {optimization.reasoning}")
+            logger.info("Cost-optimized selection", extra={"reasoning": optimization.reasoning})
             
             # Get the actual model instance
             models = self.model_registry.get_models_for_task_type(subtask.task_type)
@@ -681,7 +681,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             )
             
             if not selected_model:
-                logger.error(f"Optimized model {optimization.recommended_model} not found")
+                logger.error("Optimized model", extra={"recommended_model": optimization.recommended_model})
                 return AgentResponse(
                     subtask_id=subtask.id,
                     model_used=optimization.recommended_model,
@@ -713,7 +713,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             return response
             
         except TimeoutError as e:
-            logger.warning(f"Subtask {subtask.id} timed out: {str(e)}")
+            logger.warning("Subtask timed out", extra={"subtask_id": subtask.id, "error": str(e)})
             return AgentResponse(
                 subtask_id=subtask.id,
                 model_used="timeout",
@@ -724,7 +724,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             )
             
         except Exception as e:
-            logger.error(f"Failed to execute subtask {subtask.id}: {str(e)}")
+            logger.error("Failed to execute subtask", extra={"subtask_id": subtask.id, "error": str(e)})
             return AgentResponse(
                 subtask_id=subtask.id,
                 model_used="unknown",
@@ -788,7 +788,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             estimated_savings = cost_breakdown.get('estimated_savings', 0.0)
             total_cost = max(0.01, total_cost - estimated_savings)
             
-            logger.info(f"Cost estimate: ${total_cost:.4f}, time: {total_time:.1f}s, savings: ${estimated_savings:.4f}")
+            logger.info("Cost estimate", extra={"cost": total_cost, "time": total_time, "savings": estimated_savings})
             
             return CostEstimate(
                 estimated_cost=total_cost,
@@ -797,7 +797,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             )
             
         except Exception as e:
-            logger.warning(f"Cost estimation failed: {str(e)}")
+            logger.warning("Cost estimation failed", extra={"error": str(e)})
             return CostEstimate(
                 estimated_cost=0.10,
                 estimated_time=30.0,
@@ -814,7 +814,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         Returns:
             FallbackStrategy: The recommended fallback strategy
         """
-        logger.warning(f"Handling failure: {failure.failure_type} - {failure.error_message}")
+        logger.warning("Handling failure", extra={"failure_type": failure.failure_type, "error_message": failure.error_message})
         
         # Determine fallback strategy based on failure type
         if failure.failure_type == "model_unavailable":
@@ -830,7 +830,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                         retry_count=1
                     )
             except Exception as e:
-                logger.error(f"Failed to find alternative model: {str(e)}")
+                logger.error("Failed to find alternative model", extra={"error": str(e)})
         
         elif failure.failure_type == "timeout":
             return FallbackStrategy(strategy_type="reduce_complexity", retry_count=2)
@@ -909,7 +909,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             return analysis_results
             
         except Exception as e:
-            logger.error(f"Cost-quality analysis failed: {str(e)}")
+            logger.error("Cost-quality analysis failed", extra={"error": str(e)})
             return {'error': str(e)}
     
     def _generate_mode_recommendations(self, analysis_results: Dict[str, Any]) -> Dict[str, str]:

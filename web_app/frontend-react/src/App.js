@@ -19,6 +19,7 @@ import ConversationDetail from './pages/ConversationDetail';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
+import { SessionWarningModal } from './components/SessionWarningModal';
 
 function App() {
   const { isAuthenticated } = useAuthStore();
@@ -60,6 +61,10 @@ function App() {
           },
         }}
       />
+
+      {/* Session Warning Modal */}
+      <SessionWarningModal />
+
       <Router>
         <Routes>
           {/* Public Routes */}
@@ -83,14 +88,52 @@ function App() {
           />
 
           {/* Protected Routes */}
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-          <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
-          <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
-          <Route path="/history/:id" element={<ProtectedRoute><ConversationDetail /></ProtectedRoute>} />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              <ProtectedRoute>
+                <Chat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <Analytics />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <ProtectedRoute>
+                <History />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/history/:id"
+            element={
+              <ProtectedRoute>
+                <ConversationDetail />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Default Route */}
-          <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
+          <Route
+            path="/"
+            element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />}
+          />
         </Routes>
       </Router>
     </ErrorBoundary>

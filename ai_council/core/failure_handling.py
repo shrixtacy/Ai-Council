@@ -1,7 +1,6 @@
 """Comprehensive failure handling and resilience system for AI Council."""
 
 import asyncio
-import logging
 import time
 import threading
 from abc import ABC, abstractmethod
@@ -13,9 +12,10 @@ from uuid import uuid4
 
 from .models import AgentResponse, Subtask, FinalResponse, RiskLevel
 from .interfaces import AIModel, ModelError
+from .logger import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FailureType(Enum):
@@ -133,7 +133,7 @@ class CircuitBreaker:
             if self.state == CircuitBreakerState.OPEN:
                 if self._should_attempt_reset():
                     self.state = CircuitBreakerState.HALF_OPEN
-                    logger.info(f"Circuit breaker {self.name} moved to HALF_OPEN")
+                    logger.info("Circuit breaker moved to HALF_OPEN", extra={"circuit_breaker": self.name})
                 else:
                     raise CircuitBreakerOpenError(f"Circuit breaker {self.name} is OPEN")
         
@@ -151,7 +151,7 @@ class CircuitBreaker:
             if self.state == CircuitBreakerState.OPEN:
                 if self._should_attempt_reset():
                     self.state = CircuitBreakerState.HALF_OPEN
-                    logger.info(f"Circuit breaker {self.name} moved to HALF_OPEN")
+                    logger.info("Circuit breaker moved to HALF_OPEN", extra={"circuit_breaker": self.name})
                 else:
                     raise CircuitBreakerOpenError(f"Circuit breaker {self.name} is OPEN")
         
@@ -181,7 +181,7 @@ class CircuitBreaker:
                     self.failure_count = 0
                     self.success_count = 0
                     self.failure_times.clear()
-                    logger.info(f"Circuit breaker {self.name} reset to CLOSED")
+                    logger.info("Circuit breaker reset to CLOSED", extra={"circuit_breaker": self.name})
     
     def _on_failure(self):
         """Handle failed execution."""
@@ -198,11 +198,11 @@ class CircuitBreaker:
                 len(self.failure_times) >= self.config.failure_threshold):
                 self.state = CircuitBreakerState.OPEN
                 self.success_count = 0
-                logger.warning(f"Circuit breaker {self.name} opened due to {len(self.failure_times)} failures")
+                logger.warning("Circuit breaker opened", extra={"circuit_breaker": self.name, "failures": len(self.failure_times)})
             elif self.state == CircuitBreakerState.HALF_OPEN:
                 self.state = CircuitBreakerState.OPEN
                 self.success_count = 0
-                logger.warning(f"Circuit breaker {self.name} reopened after failure in HALF_OPEN state")
+                logger.warning("Circuit breaker reopened after failure in HALF_OPEN state", extra={"circuit_breaker": self.name})
 
 
 class CircuitBreakerOpenError(Exception):
@@ -389,7 +389,7 @@ class FailureIsolator:
     def isolate_component(self, component: str, reason: str):
         """Isolate a component temporarily."""
         self.isolated_components[component] = datetime.utcnow()
-        logger.warning(f"Isolated component {component}: {reason}")
+        logger.warning("Isolated component", extra={"component": component, "reason": reason})
     
     def is_isolated(self, component: str) -> bool:
         """Check if a component is currently isolated."""
@@ -399,7 +399,7 @@ class FailureIsolator:
         isolation_time = self.isolated_components[component]
         if datetime.utcnow() - isolation_time > self.isolation_duration:
             del self.isolated_components[component]
-            logger.info(f"Component {component} isolation expired")
+            logger.info("Component isolation expired", extra={"component": component})
             return False
         
         return True
@@ -408,7 +408,7 @@ class FailureIsolator:
         """Manually release component isolation."""
         if component in self.isolated_components:
             del self.isolated_components[component]
-            logger.info(f"Component {component} isolation manually released")
+            logger.info("Component isolation manually released", extra={"component": component})
 
 
 class ResilienceManager:
@@ -470,8 +470,12 @@ class ResilienceManager:
             self.failure_history.pop(0)
         
         logger.warning(
-            f"Handling failure: {failure.failure_type.value} in {failure.component} - "
-            f"{failure.error_message}"
+            "Handling failure",
+            extra={
+                "failure_type": failure.failure_type.value,
+                "component": failure.component,
+                "error_message": failure.error_message
+            }
         )
         
         # Find appropriate handler
@@ -485,15 +489,15 @@ class ResilienceManager:
                     if not recovery_action.should_retry:
                         failure.resolved = True
                     
-                    logger.info(f"Recovery action: {recovery_action.action_type}")
+                    logger.info("Recovery action", extra={"action_type": recovery_action.action_type})
                     return recovery_action
                     
                 except Exception as e:
-                    logger.error(f"Handler {type(handler).__name__} failed: {str(e)}")
+                    logger.error("Handler failed", extra={"handler": type(handler).__name__, "error": str(e)})
                     continue
         
         # No handler found, return default action
-        logger.warning(f"No handler found for failure type {failure.failure_type.value}")
+        logger.warning("No handler found for failure type", extra={"failure_type": failure.failure_type.value})
         return RecoveryAction(
             action_type="unhandled_failure",
             should_retry=False,

@@ -2,7 +2,7 @@
 
 import json
 import time
-import logging
+from ai_council.core.logger import get_logger
 import asyncio
 from typing import Dict, Any, Optional
 
@@ -12,7 +12,7 @@ from ..core.interfaces import ExecutionAgent, AIModel, ModelError, FailureRespon
 from ..core.models import Subtask, AgentResponse, SelfAssessment, RiskLevel, Priority, TaskType
 from ..core.failure_handling import FailureType, create_failure_event, resilience_manager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class MQExecutionAgent(ExecutionAgent):
     """
@@ -36,7 +36,7 @@ class MQExecutionAgent(ExecutionAgent):
             parsed_url = urlparse(self.redis_url)
             sanitized_netloc = f"***:***@{parsed_url.hostname}:{parsed_url.port}" if parsed_url.password else f"{parsed_url.hostname}:{parsed_url.port}"
             sanitized_url = parsed_url._replace(netloc=sanitized_netloc).geturl()
-            logger.info(f"MQExecutionAgent initialized with Redis at {sanitized_url}")
+            logger.info("MQExecutionAgent initialized with Redis at", extra={"sanitized_url": sanitized_url})
 
     async def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
         start_time = time.time()
@@ -48,10 +48,10 @@ class MQExecutionAgent(ExecutionAgent):
             
             self._ensure_connection()
             
-            logger.info(f"Pushing subtask {subtask.id} to MQ for model {model_id}")
+            logger.info("Pushing subtask to MQ", extra={"subtask_id": subtask.id, "model_id": model_id})
             await self.redis_client.rpush(self.task_queue, json.dumps(payload))
             
-            logger.debug(f"Waiting for response on {response_key}")
+            logger.debug("Waiting for response on", extra={"response_key": response_key})
             result = await self.redis_client.blpop(response_key, timeout=self.timeout_seconds)
             
             if not result:
@@ -62,7 +62,7 @@ class MQExecutionAgent(ExecutionAgent):
             
         except Exception as e:
             failed_model_id = model_id if 'model_id' in locals() else "unknown"
-            logger.error(f"MQ Execution failed for subtask {subtask.id}: {str(e)}")
+            logger.error("MQ Execution failed for subtask", extra={"subtask_id": subtask.id, "error": str(e)})
             
             failure_event = create_failure_event(
                 failure_type=FailureType.TIMEOUT if isinstance(e, TimeoutError) else FailureType.API_FAILURE,
@@ -134,7 +134,7 @@ class MQExecutionAgent(ExecutionAgent):
             )
             
         except Exception as e:
-            logger.error(f"Failed to deserialize worker response: {str(e)}")
+            logger.error("Failed to deserialize worker response", extra={"error": str(e)})
             raise
 
     async def generate_self_assessment(self, response: str, subtask: Subtask) -> SelfAssessment:

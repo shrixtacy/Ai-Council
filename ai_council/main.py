@@ -7,7 +7,7 @@ components of the AI Council system and provides a simple interface
 for processing user requests.
 """
 
-import logging
+from ai_council.core.logger import get_logger
 import sys
 import asyncio
 from pathlib import Path
@@ -95,19 +95,19 @@ class AICouncil:
             if response.success:
                 self.logger.info("Request processed successfully")
             else:
-                self.logger.warning(f"Request processing failed: {response.error_message}")
+                self.logger.warning("Request processing failed", extra={"error_message": response.error_message})
             
             return response
             
         except asyncio.TimeoutError:
-            self.logger.error(f"Request timed out after {timeout_seconds} seconds")
+            self.logger.error("Request timed out after", extra={"timeout_seconds": timeout_seconds})
             return create_error_response(
                 Exception(f"Request timed out after {timeout_seconds} seconds"),
                 context={'component': 'main.process_request', 'execution_time': timeout_seconds}
             )
         except Exception as e:
             # Catch non-timeout exceptions and return error response
-            self.logger.error(f"Request processing failed: {str(e)}")
+            self.logger.error("Request processing failed", extra={"error": str(e)})
             return create_error_response(
                 e,
                 context={'component': 'main.process_request'}
@@ -128,8 +128,8 @@ class AICouncil:
         Returns:
             FinalResponse: The final processed response
         """
-        self.logger.info(f"Processing request in {execution_mode.value} mode")
-        self.logger.debug(f"User input: {user_input[:200]}...")
+        self.logger.info("Processing request in", extra={"value": execution_mode.value})
+        self.logger.debug("User input", extra={"user_input": user_input[:200]})
         
         return await self._execute_with_timeout(user_input, execution_mode)
     
@@ -160,7 +160,7 @@ class AICouncil:
             }
             
         except Exception as e:
-            self.logger.error(f"Cost estimation failed: {str(e)}")
+            self.logger.error("Cost estimation failed", extra={"error": str(e)})
             return {
                 "estimated_cost": 0.0,
                 "estimated_time": 0.0,
@@ -185,7 +185,7 @@ class AICouncil:
             return await self.orchestration_layer.analyze_cost_quality_tradeoffs(task)
             
         except Exception as e:
-            self.logger.error(f"Trade-off analysis failed: {str(e)}")
+            self.logger.error("Trade-off analysis failed", extra={"error": str(e)})
             return {"error": str(e)}
     
     def get_system_status(self) -> Dict[str, Any]:
@@ -235,7 +235,7 @@ class AICouncil:
             }
             
         except Exception as e:
-            self.logger.error(f"System status check failed: {str(e)}")
+            self.logger.error("System status check failed", extra={"error": str(e)})
             return {
                 "status": "error",
                 "error": str(e)
@@ -253,7 +253,7 @@ class AICouncil:
             self.logger.info("AI Council application shutdown complete")
             
         except Exception as e:
-            self.logger.error(f"Error during shutdown: {str(e)}")
+            self.logger.error("Error during shutdown", extra={"error": str(e)})
 
 
 def main():

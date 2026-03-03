@@ -4,7 +4,7 @@ import os
 import json
 import time
 import asyncio
-import logging
+from ai_council.core.logger import get_logger
 import uuid
 from typing import Dict, Any, Tuple, Union
 from pathlib import Path
@@ -44,7 +44,7 @@ class CouncilWorker:
         
         self.models = self.factory.create_models_from_config()
         for name, model in self.models.items():
-            logger.info(f"Worker loaded model: {name}")
+            logger.info("Worker loaded model", extra={"name": name})
 
         from ai_council.execution.agent import BaseExecutionAgent
         self.execution_agent = BaseExecutionAgent()
@@ -107,7 +107,7 @@ class CouncilWorker:
             subtask_id = data.get("subtask_id", "unknown")
             response_key = f"ai_council:results:{subtask_id}"
             
-            logger.info(f"Worker processing subtask: {subtask_id}")
+            logger.info("Worker processing subtask", extra={"subtask_id": subtask_id})
             
             subtask, model_id = await self._deserialize_task(data)
             
@@ -124,11 +124,11 @@ class CouncilWorker:
             await self.redis_client.rpush(response_key, serialized_response)
             await self.redis_client.expire(response_key, 300)
             
-            logger.info(f"Worker completed subtask {subtask_id} in {time.time() - start_time:.2f}s")
+            logger.info("Worker completed subtask", extra={"subtask_id": subtask_id, "duration": round(time.time() - start_time, 2)})
             return True
             
         except Exception as e:
-            logger.error(f"Worker failed processing subtask {subtask_id}: {str(e)}", exc_info=True)
+            logger.error("Worker failed processing subtask", extra={"subtask_id": subtask_id, "error": str(e)}, exc_info=True)
             
             if response_key != "unknown":
                 error_resp = AgentResponse(
@@ -148,7 +148,7 @@ class CouncilWorker:
                     await self.redis_client.expire(response_key, 300)
                     return True
                 except Exception as pub_e:
-                    logger.critical(f"Worker failed to publish error for {subtask_id}: {str(pub_e)}")
+                    logger.critical("Worker failed to publish error", extra={"subtask_id": subtask_id, "error": str(pub_e)})
                     return False
             return False
 
@@ -176,14 +176,14 @@ class CouncilWorker:
                 
                 is_alive = await self.redis_client.exists(heartbeat_key)
                 if not is_alive:
-                    logger.info(f"Recovering tasks from dead worker {worker_id}")
+                    logger.info("Recovering tasks from dead worker", extra={"worker_id": worker_id})
                     while True:
                         payload = await self.redis_client.lmove(key, self.task_queue, src="RIGHT", dest="LEFT")
                         if not payload:
                             break
                         logger.info("Recovered a stale task.")
         except Exception as e:
-            logger.error(f"Failed to recover stale tasks: {str(e)}")
+            logger.error("Failed to recover stale tasks", extra={"error": str(e)})
 
     async def run(self):
         self.running = True
@@ -194,7 +194,7 @@ class CouncilWorker:
         sanitized_netloc = f"***:***@{parsed_url.hostname}:{parsed_url.port}" if parsed_url.password else f"{parsed_url.hostname}:{parsed_url.port}"
         sanitized_url = parsed_url._replace(netloc=sanitized_netloc).geturl()
         
-        logger.info(f"Worker {self.worker_id} started. Listening on Redis: {sanitized_url}, queue: {self.task_queue}")
+        logger.info("Worker started", extra={"worker_id": self.worker_id, "url": sanitized_url, "queue": self.task_queue})
         
         await self._recover_stale_tasks()
         heartbeat_task = asyncio.create_task(self._heartbeat_loop())
@@ -215,12 +215,12 @@ class CouncilWorker:
                     if success:
                         await self.redis_client.lrem(self.processing_queue, 1, payload)
                     else:
-                        logger.warning(f"Task processing failed to publish, leaving in queue: {payload}")
+                        logger.warning("Task processing failed to publish, leaving in queue", extra={"payload": payload})
                     
         except asyncio.CancelledError:
             logger.info("Worker shutdown requested.")
         except Exception as e:
-            logger.error(f"Worker encountered fatal error: {str(e)}", exc_info=True)
+            logger.error("Worker encountered fatal error", extra={"error": str(e)}, exc_info=True)
         finally:
             self.running = False
             if heartbeat_task:

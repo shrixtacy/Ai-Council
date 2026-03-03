@@ -5,7 +5,7 @@ This module provides a factory class that creates and configures all
 AI Council components based on the provided configuration.
 """
 
-import logging
+from ai_council.core.logger import get_logger
 from typing import Dict, List, Optional
 
 from .core.interfaces import (
@@ -140,7 +140,7 @@ class AICouncilFactory:
         # Register models from configuration
         for model_name, model_config in self.config.models.items():
             if not model_config.enabled:
-                self.logger.info(f"Skipping disabled model: {model_name}")
+                self.logger.info("Skipping disabled model", extra={"model_name": model_name})
                 continue
             
             try:
@@ -175,10 +175,10 @@ class AICouncilFactory:
                 if hasattr(registry, '_performance_metrics'):
                     registry._performance_metrics[model.get_model_id()] = performance_metrics
                 
-                self.logger.info(f"Registered model: {model_name}")
+                self.logger.info("Registered model", extra={"model_name": model_name})
                 
             except Exception as e:
-                self.logger.error(f"Failed to register model {model_name}: {str(e)}")
+                self.logger.error("Failed to register model", extra={"model_name": model_name, "error": str(e)})
                 continue
         
         # If no models were registered from config, create default mock models
@@ -202,14 +202,14 @@ class AICouncilFactory:
             
             if api_key:
                 # Create real model adapter
-                self.logger.info(f"Creating real {model_config.provider} adapter for {model_name}")
+                self.logger.info("Creating real adapter", extra={"provider": model_config.provider, "model_name": model_name})
                 return create_model_adapter(model_config.provider, model_name, api_key)
             else:
-                self.logger.warning(f"No API key found for {model_name}, using mock model")
+                self.logger.warning("No API key found for", extra={"model_name": model_name})
         except ImportError:
-            self.logger.warning(f"Real adapters not available, using mock model for {model_name}")
+            self.logger.warning("Real adapters not available, using mock model for", extra={"model_name": model_name})
         except Exception as e:
-            self.logger.warning(f"Failed to create real adapter for {model_name}: {str(e)}, using mock")
+            self.logger.warning("Failed to create real adapter, using mock", extra={"model_name": model_name, "error": str(e)})
         
         # Fallback to mock models
         if model_config.provider == "openai":
@@ -352,7 +352,7 @@ class AICouncilFactory:
             sanitized_netloc = f"***:***@{parsed_url.hostname}:{parsed_url.port}" if parsed_url.password else f"{parsed_url.hostname}:{parsed_url.port}"
             sanitized_url = parsed_url._replace(netloc=sanitized_netloc).geturl()
             
-            self.logger.info(f"Using MQExecutionAgent with Redis URL: {sanitized_url}")
+            self.logger.info("Using MQExecutionAgent with Redis URL", extra={"sanitized_url": sanitized_url})
             
             raw_timeout = self.config.execution.default_timeout_seconds
             safe_timeout = int(math.ceil(raw_timeout)) if raw_timeout and raw_timeout > 0 else 1
@@ -404,9 +404,9 @@ class AICouncilFactory:
                 try:
                     model = self._create_model_instance(model_name, model_config)
                     models[model_name] = model
-                    self.logger.info(f"Created model instance: {model_name}")
+                    self.logger.info("Created model instance", extra={"model_name": model_name})
                 except Exception as e:
-                    self.logger.error(f"Failed to create model {model_name}: {str(e)}")
+                    self.logger.error("Failed to create model", extra={"model_name": model_name, "error": str(e)})
         
         return models
     

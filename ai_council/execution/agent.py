@@ -1,7 +1,7 @@
 """Execution agent implementation for AI Council."""
 
 import time
-import logging
+from ai_council.core.logger import get_logger
 import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -17,7 +17,7 @@ from ..core.timeout_handler import (
 )
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BaseExecutionAgent(ExecutionAgent):
@@ -65,7 +65,7 @@ class BaseExecutionAgent(ExecutionAgent):
         start_time = time.time()
         model_id = model.get_model_id()
         
-        logger.info(f"Executing subtask {subtask.id} with model {model_id}")
+        logger.info("Executing subtask", extra={"subtask_id": subtask.id, "model_id": model_id})
         
         # Track execution attempt
         execution_key = f"{subtask.id}_{model_id}"
@@ -78,7 +78,7 @@ class BaseExecutionAgent(ExecutionAgent):
         
         # Check if component is isolated
         if resilience_manager.failure_isolator.is_isolated(f"model_{model_id}"):
-            logger.warning(f"Model {model_id} is isolated, skipping execution")
+            logger.warning("Model", extra={"model_id": model_id})
             return self._create_failure_response(
                 subtask, model_id, "Model is temporarily isolated", start_time
             )
@@ -95,7 +95,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 while True:
                     allowed, wait_time = rate_limit_manager.check_rate_limit(provider)
                     if not allowed:
-                        logger.info(f"Rate limit hit for {provider}, waiting {wait_time:.1f}s")
+                        logger.info("Rate limit hit", extra={"provider": provider, "wait_time": wait_time})
                         await asyncio.sleep(wait_time)
                     else:
                         break
@@ -128,7 +128,7 @@ class BaseExecutionAgent(ExecutionAgent):
                     }
                 )
                 
-                logger.info(f"Successfully executed subtask {subtask.id} on attempt {attempt + 1}")
+                logger.info("Successfully executed subtask", extra={"subtask_id": subtask.id, "attempt": attempt + 1})
                 return agent_response
                 
             except Exception as e:
@@ -164,7 +164,7 @@ class BaseExecutionAgent(ExecutionAgent):
                     import random
                     jitter = random.uniform(0.8, 1.2)  # ±20% jitter
                     delay = recovery_action.retry_delay * jitter
-                    logger.info(f"Waiting {delay:.1f}s before retry")
+                    logger.info("Waiting", extra={"delay_seconds": round(delay, 1)})
                     await asyncio.sleep(delay)
         
         # All attempts failed, return failure response
@@ -251,7 +251,7 @@ class BaseExecutionAgent(ExecutionAgent):
         original_start_time: float
     ) -> AgentResponse:
         """Execute subtask with fallback model."""
-        logger.info(f"Attempting fallback execution with model {fallback_model_id}")
+        logger.info("Attempting fallback execution with model", extra={"fallback_model_id": fallback_model_id})
         
         # TODO: Implement real fallback execution (#113)
         # We need to resolve the fallback model instance from the ModelRegistry

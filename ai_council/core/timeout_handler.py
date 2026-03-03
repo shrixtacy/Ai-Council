@@ -2,7 +2,7 @@
 
 import asyncio
 import functools
-import logging
+from ai_council.core.logger import get_logger
 import signal
 import threading
 import time
@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from .failure_handling import FailureEvent, FailureType, RiskLevel, resilience_manager
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 T = TypeVar('T')
 
@@ -225,7 +225,7 @@ class AdaptiveTimeoutManager:
             for operation, timeout in custom_defaults.items():
                 if timeout > 0:
                     self.default_timeouts[operation] = timeout
-                    logger.debug(f"Updated default timeout for {operation} to {timeout}s")
+                    logger.debug("Updated default timeout", extra={"operation": operation, "timeout": timeout})
     
     def record_execution_time(self, operation: str, execution_time: float):
         """Record execution time for an operation."""
@@ -539,7 +539,7 @@ def with_rate_limit(resource: str, component: str = ""):
             allowed, wait_time = rate_limit_manager.check_rate_limit(resource)
             
             if not allowed:
-                logger.warning(f"Rate limit exceeded for {resource}, waiting {wait_time:.1f}s")
+                logger.warning("Rate limit exceeded", extra={"resource": resource, "wait_time": wait_time})
                 time.sleep(wait_time)
             
             return func(*args, **kwargs)

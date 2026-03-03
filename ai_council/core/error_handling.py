@@ -7,7 +7,7 @@ This module provides centralized error handling utilities including:
 """
 
 import functools
-import logging
+from ai_council.core.logger import get_logger
 from typing import Callable, Dict, Optional, Any, Type, List
 
 from .exceptions import (
@@ -18,7 +18,7 @@ from .exceptions import (
 from .models import FinalResponse, CostBreakdown
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # Default mapping of exception types to error type strings
@@ -222,7 +222,7 @@ def with_error_handling(
                 return func(*args, **kwargs)
             except Exception as e:
                 if log_errors:
-                    logger.error(f"Error in {stage_name}: {str(e)}")
+                    logger.error("Error in stage", extra={"stage": stage_name, "error": str(e)})
                 
                 # Check for custom handlers
                 if error_handlers:
@@ -262,16 +262,16 @@ def with_ai_council_error_handling(
                 return func(*args, **kwargs)
             except AICouncilError as e:
                 if reraise_ai_council_errors:
-                    logger.error(f"Critical error in {stage_name}: {str(e)}")
+                    logger.error("Critical error in stage", extra={"stage": stage_name, "error": str(e)})
                     raise
                 else:
-                    logger.warning(f"Handled error in {stage_name}: {str(e)}")
+                    logger.warning("Handled error in stage", extra={"stage": stage_name, "error": str(e)})
                     return create_error_response(
                         e,
                         context={'component': stage_name}
                     )
             except Exception as e:
-                logger.error(f"Unexpected error in {stage_name}: {str(e)}")
+                logger.error("Unexpected error in stage", extra={"stage": stage_name, "error": str(e)})
                 return create_error_response(
                     e,
                     context={'component': stage_name}
@@ -321,7 +321,7 @@ class PipelineStage:
         Returns:
             FinalResponse: A standardized error response
         """
-        self._logger.error(f"Error in {self.name}: {str(error)}")
+        self._logger.error("Error", extra={"name": self.name, "error": str(error)})
         return create_error_response(
             error,
             context={'component': self.name}

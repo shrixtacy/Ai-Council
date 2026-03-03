@@ -6,13 +6,13 @@ import inspect
 import sys
 from pathlib import Path
 from typing import Dict, List, Type, Any, Optional, Callable
-import logging
+from ai_council.core.logger import get_logger
 
 from ..core.interfaces import AIModel, AnalysisEngine, TaskDecomposer, ExecutionAgent
 from ..core.interfaces import ArbitrationLayer, SynthesisLayer, ModelRegistry
 from .config import PluginConfig, AICouncilConfig
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class PluginError(Exception):
@@ -52,7 +52,7 @@ class PluginManager:
                 try:
                     self.load_plugin(plugin_name, plugin_config)
                 except Exception as e:
-                    logger.error(f"Failed to load plugin {plugin_name}: {e}")
+                    logger.error("Failed to load plugin", extra={"plugin_name": plugin_name, "error": str(e)})
                     if self.config.debug:
                         raise
     
@@ -89,7 +89,7 @@ class PluginManager:
             self.loaded_plugins[plugin_name] = plugin_class
             self.plugin_types[plugin_name] = interface_type
             
-            logger.info(f"Successfully loaded plugin {plugin_name} ({interface_type.__name__})")
+            logger.info("Successfully loaded plugin", extra={"plugin_name": plugin_name, "interface_type": interface_type.__name__})
             return plugin_class
             
         except Exception as e:
@@ -123,7 +123,7 @@ class PluginManager:
             instance = plugin_class(*args, **merged_kwargs)
             self.plugin_instances[plugin_name] = instance
             
-            logger.info(f"Created instance of plugin {plugin_name}")
+            logger.info("Created instance of plugin", extra={"plugin_name": plugin_name})
             return instance
             
         except Exception as e:
@@ -168,7 +168,7 @@ class PluginManager:
                 try:
                     instance.cleanup()
                 except Exception as e:
-                    logger.warning(f"Error during cleanup of plugin {plugin_name}: {e}")
+                    logger.warning("Error during cleanup of plugin", extra={"plugin_name": plugin_name, "error": str(e)})
             del self.plugin_instances[plugin_name]
         
         if plugin_name in self.loaded_plugins:
@@ -177,7 +177,7 @@ class PluginManager:
         if plugin_name in self.plugin_types:
             del self.plugin_types[plugin_name]
         
-        logger.info(f"Unloaded plugin {plugin_name}")
+        logger.info("Unloaded plugin", extra={"plugin_name": plugin_name})
     
     def reload_plugin(self, plugin_name: str) -> Any:
         """Reload a plugin (useful for development).
@@ -243,7 +243,7 @@ class PluginManager:
                             discovered_plugins.append(f"{module_path}.{name}")
                             
             except Exception as e:
-                logger.debug(f"Could not inspect {py_file}: {e}")
+                logger.debug("Could not inspect py file", extra={"py_file": py_file, "error": str(e)})
         
         return discovered_plugins
     
