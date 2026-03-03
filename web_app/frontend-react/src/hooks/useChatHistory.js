@@ -63,9 +63,11 @@ export const useChatHistory = (page = 1, limit = 20) => {
     async (id) => {
       try {
         await authAPI.delete(`/chat/history/${id}`);
+        if (!mountedRef.current) return;
         toast.success('Conversation deleted');
         fetchHistory();
       } catch (err) {
+        if (!mountedRef.current) return;
         const message =
           err.response?.data?.message ||
           err.message ||
