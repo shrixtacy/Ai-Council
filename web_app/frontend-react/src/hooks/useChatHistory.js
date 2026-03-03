@@ -19,6 +19,7 @@ export const useChatHistory = (page = 1, limit = 20) => {
   });
 
   const mountedRef = useRef(true);
+  const requestSeqRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -28,6 +29,7 @@ export const useChatHistory = (page = 1, limit = 20) => {
   }, []);
 
   const fetchHistory = useCallback(async () => {
+    const requestSeq = ++requestSeqRef.current;
     try {
       setLoading(true);
       setError(null);
@@ -36,7 +38,7 @@ export const useChatHistory = (page = 1, limit = 20) => {
         `/chat/history?page=${page}&limit=${limit}`
       );
 
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestSeq !== requestSeqRef.current) return;
 
       setHistory(data.data || []);
       setPagination({
@@ -45,13 +47,15 @@ export const useChatHistory = (page = 1, limit = 20) => {
         total: data.total || 0,
       });
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestSeq !== requestSeqRef.current) return;
 
       const message =
         err.response?.data?.message || err.message || 'Failed to fetch history';
       setError(message);
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current && requestSeq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, [page, limit]);
 
