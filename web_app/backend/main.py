@@ -1,7 +1,5 @@
 """FastAPI backend for AI Council web interface."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import inspect
@@ -12,6 +10,8 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
+
+import jwt
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -254,14 +254,95 @@ async def analyze_tradeoffs(req: RequestModel, ai_council: AICouncil = Depends(g
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+
+class WebSocketManager:
+    def __init__(self):
+        self.active_connections: int = 0
+        self.ip_connections: Dict[str, int] = {}
+        self.message_timestamps: Dict[WebSocket, List[float]] = {}
+
+        self.MAX_CONNECTIONS = 1000
+        self.MAX_IP_CONNECTIONS = 10
+        self.RATE_LIMIT_MESSAGES = 20
+        self.RATE_LIMIT_WINDOW = 60  # seconds
+
+    async def authenticate(self, websocket: WebSocket) -> bool:
+        token = websocket.query_params.get("token")
+        if not token:
+            return False
+        try:
+            jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            return True
+        except jwt.PyJWTError:
+            return False
+
+    def connect(self, websocket: WebSocket, client_ip: str) -> bool:
+        if self.active_connections >= self.MAX_CONNECTIONS:
+            return False
+        
+        current_ip_count = self.ip_connections.get(client_ip, 0)
+        if current_ip_count >= self.MAX_IP_CONNECTIONS:
+            return False
+
+        self.active_connections += 1
+        self.ip_connections[client_ip] = current_ip_count + 1
+        self.message_timestamps[websocket] = []
+        return True
+
+    def disconnect(self, websocket: WebSocket, client_ip: str):
+        if websocket in self.message_timestamps:
+            del self.message_timestamps[websocket]
+            self.active_connections = max(0, self.active_connections - 1)
+            if client_ip in self.ip_connections:
+                self.ip_connections[client_ip] = max(0, self.ip_connections[client_ip] - 1)
+                if self.ip_connections[client_ip] == 0:
+                    del self.ip_connections[client_ip]
+
+    def check_rate_limit(self, websocket: WebSocket) -> bool:
+        """Returns True if limits are exceeded."""
+        now = time.time()
+        timestamps = self.message_timestamps.get(websocket, [])
+        # Remove timestamps older than RATE_LIMIT_WINDOW
+        timestamps = [ts for ts in timestamps if now - ts < self.RATE_LIMIT_WINDOW]
+        
+        if len(timestamps) >= self.RATE_LIMIT_MESSAGES:
+            self.message_timestamps[websocket] = timestamps
+            return True
+            
+        timestamps.append(now)
+        self.message_timestamps[websocket] = timestamps
+        return False
+
+ws_manager = WebSocketManager()
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    
+    client = websocket.client
+    client_ip = client.host if client else "unknown"
+
+    if not await ws_manager.authenticate(websocket):
+        await websocket.close(code=4001, reason="Authentication failed")
+        return
+
+    if not ws_manager.connect(websocket, client_ip):
+        await websocket.close(code=1008, reason="Connection limit exceeded")
+        return
+
     ai_council: AICouncil = websocket.app.state.ai_council
 
     try:
         while True:
             data = await websocket.receive_text()
+            
+            if ws_manager.check_rate_limit(websocket):
+                await websocket.send_json({"type": "error", "message": "Rate limit exceeded. Please wait."})
+                continue
+                
             request_data = json.loads(data)
 
             query = request_data.get("query", "")
@@ -277,7 +358,12 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
     except Exception as exc:
         logging.getLogger(__name__).exception("Unexpected websocket error")
-        await websocket.send_json({"type": "error", "message": "Internal server error"})
+        try:
+            await websocket.send_json({"type": "error", "message": "Internal server error"})
+        except Exception:
+            pass
+    finally:
+        ws_manager.disconnect(websocket, client_ip)
 
 
 if __name__ == "__main__":

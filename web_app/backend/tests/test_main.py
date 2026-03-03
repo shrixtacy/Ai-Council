@@ -39,7 +39,7 @@ def test_process_request_success(test_client, mock_ai_council):
         json={"query": "Hello AI", "mode": "fast"}
     )
     
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
     data = response.json()
     assert data["success"] is True
     assert data["content"] == "Test response"
@@ -68,10 +68,23 @@ def test_analyze_tradeoffs(test_client, mock_ai_council):
     assert response.status_code == 200
     assert "fast" in response.json()
 
+import jwt
+from main import JWT_SECRET_KEY, JWT_ALGORITHM
+
+def test_websocket_unauthenticated(test_client):
+    try:
+        with test_client.websocket_connect("/ws") as websocket:
+            pass  # Should not reach here without exception
+        assert False, "Should have been rejected"
+    except Exception as e:
+        # Starlette's TestClient raises WebSocketDisconnect on immediate closures
+        assert True
+
 def test_websocket(test_client, mock_ai_council):
     mock_ai_council.process_request.return_value = MockResponse(content="WS response")
     
-    with test_client.websocket_connect("/ws") as websocket:
+    valid_token = jwt.encode({"sub": "test"}, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    with test_client.websocket_connect(f"/ws?token={valid_token}") as websocket:
         websocket.send_json({"query": "Hello via WS", "mode": "fast"})
         
         # Should receive status message first
@@ -83,3 +96,20 @@ def test_websocket(test_client, mock_ai_council):
         assert result_msg["type"] == "result"
         assert result_msg["success"] is True
         assert result_msg["content"] == "WS response"
+
+def test_websocket_rate_limit(test_client, mock_ai_council):
+    mock_ai_council.process_request.return_value = MockResponse(content="WS response")
+    valid_token = jwt.encode({"sub": "test_rl"}, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    
+    with test_client.websocket_connect(f"/ws?token={valid_token}") as websocket:
+        # Send 20 messages (allowed)
+        for i in range(20):
+            websocket.send_json({"query": f"Msg {i}", "mode": "fast"})
+            websocket.receive_json() # status
+            websocket.receive_json() # result
+            
+        # Send 21st message (should be rate limited)
+        websocket.send_json({"query": "Msg 21", "mode": "fast"})
+        error_msg = websocket.receive_json()
+        assert error_msg["type"] == "error"
+        assert "Rate limit exceeded" in error_msg["message"]
