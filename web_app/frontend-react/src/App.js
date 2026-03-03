@@ -15,6 +15,7 @@ import Dashboard from './pages/Dashboard';
 import Chat from './pages/Chat';
 import Analytics from './pages/Analytics';
 import History from './pages/History';
+import ConversationDetail from './pages/ConversationDetail';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -23,7 +24,7 @@ function App() {
   const { isAuthenticated } = useAuthStore();
 
   return (
-        <ErrorBoundary>
+    <ErrorBoundary>
       {/* Toast notification container */}
       <Toaster
         position="top-right"
@@ -59,39 +60,40 @@ function App() {
           },
         }}
       />
-    <Router>
-      <Routes>
-        {/* Public Routes */}
-        <Route 
-          path="/login" 
-          element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />} 
-        />
-        <Route 
-          path="/register" 
-          element={isAuthenticated ? <Navigate to="/dashboard" /> : <Register />} 
-        />
-        <Route path="/verify-otp" element={<VerifyOTP />} />
-        <Route path="/verify-email" element={<VerifyEmailReminder />} />
-        <Route 
-          path="/forgot-password" 
-          element={isAuthenticated ? <Navigate to="/dashboard" /> : <ForgotPassword />} 
-        />
-        <Route 
-          path="/reset-password/:token" 
-          element={isAuthenticated ? <Navigate to="/dashboard" /> : <ResetPassword />} 
-        />
+      <Router>
+        <Routes>
+          {/* Public Routes */}
+          <Route
+            path="/login"
+            element={isAuthenticated ? <Navigate to="/dashboard" /> : <Login />}
+          />
+          <Route
+            path="/register"
+            element={isAuthenticated ? <Navigate to="/dashboard" /> : <Register />}
+          />
+          <Route path="/verify-otp" element={<VerifyOTP />} />
+          <Route path="/verify-email" element={<VerifyEmailReminder />} />
+          <Route
+            path="/forgot-password"
+            element={isAuthenticated ? <Navigate to="/dashboard" /> : <ForgotPassword />}
+          />
+          <Route
+            path="/reset-password/:token"
+            element={isAuthenticated ? <Navigate to="/dashboard" /> : <ResetPassword />}
+          />
 
-        {/* Protected Routes */}
-        <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-        <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-        <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
-        <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+          {/* Protected Routes */}
+          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+          <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+          <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+          <Route path="/history/:id" element={<ProtectedRoute><ConversationDetail /></ProtectedRoute>} />
 
-        {/* Default Route */}
-        <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
-      </Routes>
-    </Router>
-</ErrorBoundary>
+          {/* Default Route */}
+          <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
+        </Routes>
+      </Router>
+    </ErrorBoundary>
   );
 }
 
