@@ -336,17 +336,17 @@ async def websocket_endpoint(websocket: WebSocket):
     client = websocket.client
     client_ip = client.host if client else "unknown"
 
-    if not await ws_manager.authenticate(websocket):
-        await websocket.close(code=4001, reason="Authentication failed")
-        return
-
     if not ws_manager.connect(websocket, client_ip):
         await websocket.close(code=1008, reason="Connection limit exceeded")
         return
 
-    ai_council: AICouncil = websocket.app.state.ai_council
-
     try:
+        if not await ws_manager.authenticate(websocket):
+            await websocket.close(code=4001, reason="Authentication failed")
+            return
+
+        ai_council: AICouncil = websocket.app.state.ai_council
+
         while True:
             data = await websocket.receive_text()
             
