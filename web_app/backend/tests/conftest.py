@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+os.environ["JWT_SECRET_KEY"] = "test-secret"
+os.environ["JWT_ALGORITHM"] = "HS256"
+
 # We need to mock AICouncil before importing main, as main.py instantiates it on startup.
 # main.py initializes AICouncil inside the app lifespan context manager, not a module-level startup hook.
 @pytest.fixture

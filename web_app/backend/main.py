@@ -254,7 +254,9 @@ async def analyze_tradeoffs(req: RequestModel, ai_council: AICouncil = Depends(g
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not JWT_SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY must be set")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
 class WebSocketManager:
@@ -271,7 +273,16 @@ class WebSocketManager:
     async def authenticate(self, websocket: WebSocket) -> bool:
         token = websocket.query_params.get("token")
         if not token:
+            try:
+                import asyncio
+                auth_payload = await asyncio.wait_for(websocket.receive_json(), timeout=5)
+                token = auth_payload.get("token") if isinstance(auth_payload, dict) else None
+            except Exception:
+                pass
+                
+        if not token:
             return False
+            
         try:
             jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
             return True
@@ -341,7 +352,8 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if ws_manager.check_rate_limit(websocket):
                 await websocket.send_json({"type": "error", "message": "Rate limit exceeded. Please wait."})
-                continue
+                await websocket.close(code=1008, reason="Rate limit exceeded")
+                break
                 
             request_data = json.loads(data)
 

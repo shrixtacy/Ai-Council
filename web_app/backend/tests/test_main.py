@@ -69,16 +69,17 @@ def test_analyze_tradeoffs(test_client, mock_ai_council):
     assert "fast" in response.json()
 
 import jwt
+from starlette.websockets import WebSocketDisconnect
 from main import JWT_SECRET_KEY, JWT_ALGORITHM
 
 def test_websocket_unauthenticated(test_client):
     try:
         with test_client.websocket_connect("/ws") as websocket:
-            pass  # Should not reach here without exception
-        assert False, "Should have been rejected"
-    except Exception as e:
-        # Starlette's TestClient raises WebSocketDisconnect on immediate closures
-        assert True
+            websocket.send_json({"token": "invalid_token_payload"})
+            websocket.receive_text()
+        raise AssertionError("Should have been rejected")
+    except WebSocketDisconnect as e:
+        assert e.code == 4001
 
 def test_websocket(test_client, mock_ai_council):
     mock_ai_council.process_request.return_value = MockResponse(content="WS response")

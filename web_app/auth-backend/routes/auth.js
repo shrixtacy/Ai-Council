@@ -13,7 +13,7 @@ const { protect, protectOptional } = require('../middleware/auth');
 // Password strength validation helper
 const validatePasswordStrength = (password) => {
   const errors = [];
-  
+
   if (password.length < 8) {
     errors.push('Password must be at least 8 characters long');
   }
@@ -29,7 +29,7 @@ const validatePasswordStrength = (password) => {
   if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
     errors.push('Password must contain at least one special character');
   }
-  
+
   return {
     isValid: errors.length === 0,
     errors
@@ -44,9 +44,13 @@ const generateOTP = () => {
 
 // Generate JWT Token
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE
-  });
+  return jwt.sign(
+    { id, jti: crypto.randomBytes(16).toString('hex') },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: process.env.JWT_EXPIRE
+    }
+  );
 };
 
 // @route   POST /api/auth/register
@@ -231,8 +235,8 @@ router.post('/login', [
     }
 
     if (!user.isVerified) {
-      return res.status(403).json({ 
-        success: false, 
+      return res.status(403).json({
+        success: false,
         message: 'Please verify your email first',
         userId: user._id,
         needsVerification: true
