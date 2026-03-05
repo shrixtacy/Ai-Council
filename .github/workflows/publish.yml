@@ -1,0 +1,54 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.8 (supports 3.8+)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+          cache: "pip"
+
+      - name: Install build and publishing tools
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade build twine
+
+      - name: Build source and wheel distributions
+        run: |
+          set -euxo pipefail
+          python -m build
+
+      - name: Validate package distributions
+        run: |
+          set -euxo pipefail
+          python -m twine check --strict dist/*
+
+      - name: Publish package to PyPI
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          set -euxo pipefail
+          test -n "${TWINE_USERNAME}"
+          test -n "${TWINE_PASSWORD}"
+          python -m twine upload --non-interactive dist/*
