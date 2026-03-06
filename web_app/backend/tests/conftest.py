@@ -22,6 +22,9 @@ def mock_ai_council():
 
 @pytest.fixture
 def test_client(mock_ai_council):
+    # Ensure JWT secret is set for WebSocket JWT auth in tests.
+    os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
+
     from main import app
     
     with TestClient(app) as client:

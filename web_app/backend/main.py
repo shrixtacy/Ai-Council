@@ -9,9 +9,12 @@ import json
 import os
 import sys
 import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple
+
+import jwt
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -210,6 +213,96 @@ def serialize_response(response) -> Dict[str, Any]:
     }
 
 
+def _get_jwt_secret() -> str:
+    """
+    Shared JWT secret used to validate WebSocket auth tokens.
+
+    This should match the JWT secret used by the auth backend.
+    """
+    secret = os.getenv("JWT_SECRET", "").strip()
+    if not secret:
+        logging.getLogger(__name__).error("JWT_SECRET is not configured for WebSocket authentication.")
+    return secret
+
+
+def _extract_ws_token(websocket: WebSocket) -> Optional[str]:
+    # Prefer query params first for browser compatibility.
+    token = websocket.query_params.get("token") or websocket.query_params.get("access_token")
+    if token:
+        return token.strip()
+
+    auth = websocket.headers.get("authorization")
+    if auth and auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return None
+
+
+def _decode_jwt_token(token: str) -> Optional[Dict[str, Any]]:
+    secret = _get_jwt_secret()
+    if not secret:
+        return None
+    try:
+        # Audience/issuer validation can be added if needed.
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
+        return payload
+    except jwt.PyJWTError as exc:  # broad but intentional – any JWT error → invalid
+        logging.getLogger(__name__).warning("Invalid WebSocket JWT: %s", exc)
+        return None
+
+
+def _get_ws_client_key(websocket: WebSocket, token: Optional[str]) -> str:
+    # Prefer token-based keying; fall back to IP.
+    if token:
+        return f"token:{token}"
+    host = websocket.client.host if websocket.client else "unknown"
+    return f"ip:{host}"
+
+
+def _parse_rate(spec: str, *, default: Tuple[int, float]) -> Tuple[int, float]:
+    """
+    Parse a rate spec like "20/60" meaning 20 events per 60 seconds.
+    Returns (limit, window_seconds).
+    """
+    if not spec:
+        return default
+    try:
+        left, right = spec.split("/", 1)
+        limit = int(left.strip())
+        window = float(right.strip())
+        if limit <= 0 or window <= 0:
+            raise ValueError("limit/window must be positive")
+        return limit, window
+    except Exception:
+        logging.getLogger(__name__).warning("Invalid WS_RATE_LIMIT=%r, using default %r", spec, default)
+        return default
+
+
+class _WebSocketRateLimiter:
+    def __init__(self, limit: int, window_seconds: float):
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self._events: Dict[str, Deque[float]] = defaultdict(deque)
+
+    def allow(self, key: str, now: float) -> bool:
+        q = self._events[key]
+        cutoff = now - self.window_seconds
+        while q and q[0] <= cutoff:
+            q.popleft()
+        if len(q) >= self.limit:
+            return False
+        q.append(now)
+        return True
+
+
+_ws_rate_limit_spec = os.getenv("WS_RATE_LIMIT", "20/60")
+_ws_limit, _ws_window = _parse_rate(_ws_rate_limit_spec, default=(20, 60.0))
+_ws_msg_limiter = _WebSocketRateLimiter(_ws_limit, _ws_window)
+_ws_active_connections: Dict[str, int] = defaultdict(int)  # keyed by client IP
+_ws_total_connections: int = 0
+_ws_max_connections_per_ip = int(os.getenv("WS_MAX_CONNECTIONS_PER_IP", "5") or "5")
+_ws_max_connections_global = int(os.getenv("WS_MAX_CONNECTIONS_GLOBAL", "50") or "50")
+
+
 @app.get("/")
 async def root():
     return {"message": "AI Council API", "version": "1.0.0", "status": "operational"}
@@ -256,13 +349,80 @@ async def analyze_tradeoffs(req: RequestModel, ai_council: AICouncil = Depends(g
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    # Connection-level accounting
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    global _ws_total_connections
+
+    # Enforce IP and global connection limits before accepting.
+    if _ws_total_connections >= _ws_max_connections_global:
+        await websocket.close(code=4429)
+        return
+    if _ws_active_connections[client_ip] >= _ws_max_connections_per_ip:
+        await websocket.close(code=4429)
+        return
+
+    # Try to get JWT from query/header first.
+    token = _extract_ws_token(websocket)
+    jwt_payload: Optional[Dict[str, Any]] = None
+
+    if token:
+        jwt_payload = _decode_jwt_token(token)
+        if jwt_payload is None:
+            # Invalid token → close with requested code 4001.
+            await websocket.close(code=4001)
+            return
+
+    # At this point, either we have a valid JWT or we will expect it
+    # as part of the first client message.
     await websocket.accept()
+    _ws_total_connections += 1
+    _ws_active_connections[client_ip] += 1
+
     ai_council: AICouncil = websocket.app.state.ai_council
 
     try:
+        # Per-connection timestamps for rate limiting (20 messages/minute by default)
+        message_timestamps: Deque[float] = deque()
+        per_connection_limit = 20
+        per_connection_window = 60.0
+
         while True:
             data = await websocket.receive_text()
-            request_data = json.loads(data)
+
+            now = time.time()
+            cutoff = now - per_connection_window
+            while message_timestamps and message_timestamps[0] <= cutoff:
+                message_timestamps.popleft()
+            if len(message_timestamps) >= per_connection_limit:
+                await websocket.send_json(
+                    {"type": "error", "message": "Too many messages on this connection. Please slow down."}
+                )
+                await websocket.close(code=4429)
+                return
+            message_timestamps.append(now)
+
+            if len(data) > 50_000:
+                await websocket.send_json({"type": "error", "message": "Message too large"})
+                await websocket.close(code=1009)
+                return
+
+            try:
+                request_data = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                continue
+
+            # If we still don't have a validated JWT, allow the client to provide it
+            # in the first message as {"token": "..."}.
+            if jwt_payload is None:
+                msg_token = request_data.get("token")
+                if not isinstance(msg_token, str):
+                    await websocket.close(code=4001)
+                    return
+                jwt_payload = _decode_jwt_token(msg_token)
+                if jwt_payload is None:
+                    await websocket.close(code=4001)
+                    return
 
             query = request_data.get("query", "")
             mode = request_data.get("mode", "balanced")
@@ -278,6 +438,10 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as exc:
         logging.getLogger(__name__).exception("Unexpected websocket error")
         await websocket.send_json({"type": "error", "message": "Internal server error"})
+    finally:
+        _ws_active_connections[client_key] = max(0, _ws_active_connections[client_key] - 1)
+        if _ws_active_connections[client_key] == 0:
+            _ws_active_connections.pop(client_key, None)
 
 
 if __name__ == "__main__":

@@ -70,8 +70,13 @@ def test_analyze_tradeoffs(test_client, mock_ai_council):
 
 def test_websocket(test_client, mock_ai_council):
     mock_ai_council.process_request.return_value = MockResponse(content="WS response")
-    
-    with test_client.websocket_connect("/ws") as websocket:
+
+    # Create a simple JWT matching the test JWT_SECRET.
+    import jwt
+
+    token = jwt.encode({"sub": "test-user"}, "test-jwt-secret", algorithm="HS256")
+
+    with test_client.websocket_connect(f"/ws?token={token}") as websocket:
         websocket.send_json({"query": "Hello via WS", "mode": "fast"})
         
         # Should receive status message first
