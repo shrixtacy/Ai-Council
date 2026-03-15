@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-council-orchestrator"
-version = "1.0.0"
+version = "1.3.0"
 description = "A production-grade multi-agent AI orchestration system that intelligently coordinates multiple AI models"
 readme = "README.md"
 requires-python = ">=3.8"

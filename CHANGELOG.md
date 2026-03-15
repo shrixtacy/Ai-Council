@@ -1,89 +1,149 @@
 # Changelog
 
-All notable changes to AI Council Orchestrator will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [1.0.0] - 2024-12-30
-
-### 🎉 Initial Release
-
-This is the first official release of AI Council Orchestrator on PyPI!
-
-#### Added
-- **Core Orchestration System**: Complete 5-layer architecture (Analysis → Routing → Execution → Arbitration → Synthesis)
-- **Multi-Agent Coordination**: Intelligent coordination of multiple AI models
-- **Execution Modes**: FAST, BALANCED, and BEST_QUALITY execution modes
-- **Cost Optimization**: Built-in cost tracking and optimization
-- **Failure Handling**: Comprehensive error handling and resilience mechanisms
-- **Configuration System**: Flexible YAML-based configuration
-- **Plugin Architecture**: Extensible plugin system for custom integrations
-- **Comprehensive Testing**: 95 test cases with property-based testing
-- **Documentation**: Complete documentation suite with examples
-
-#### Core Features
-- **Analysis Layer**: Task decomposition and intent understanding
-- **Routing Layer**: Intelligent model selection and task routing
-- **Execution Layer**: Model execution with structured self-assessment
-- **Arbitration Layer**: Conflict resolution and output validation
-- **Synthesis Layer**: Response combination and formatting
-
-#### Infrastructure
-- **Logging**: Structured logging with configurable levels
-- **Monitoring**: Performance metrics and system health monitoring
-- **Timeout Management**: Adaptive timeout handling
-- **Circuit Breakers**: Automatic failure detection and recovery
-- **Rate Limiting**: Built-in rate limiting for API calls
-
-#### Developer Experience
-- **Factory Pattern**: Simple factory for creating AI Council instances
-- **Type Safety**: Full type hints and mypy support
-- **Async Support**: Both synchronous and asynchronous APIs
-- **Configuration Builder**: Fluent API for building configurations
-- **Mock Models**: Built-in mock models for testing and development
-
-#### Documentation & Examples
-- **API Reference**: Complete API documentation
-- **Architecture Guide**: Detailed system architecture documentation
-- **Business Case**: Business value and use case documentation
-- **Usage Guide**: Comprehensive usage examples
-- **Getting Started**: Quick start guide for new users
-- **Examples**: Multiple working examples and tutorials
-
-#### Package Information
-- **PyPI Package**: `ai-council-orchestrator`
-- **Python Support**: 3.8+
-- **License**: MIT
-- **Dependencies**: Minimal production dependencies
-- **Installation**: `pip install ai-council-orchestrator`
-
-### Technical Details
-- **Lines of Code**: 8,000+ lines of production-ready Python code
-- **Test Coverage**: 45% code coverage with 95 passing tests
-- **Architecture**: Clean, modular architecture with dependency injection
-- **Performance**: Optimized for both speed and quality
-- **Scalability**: Designed for production workloads
-
-### 🚀 Getting Started
-
-```bash
-# Install from PyPI
-pip install ai-council-orchestrator
-
-# Basic usage
-from ai_council.factory import AICouncilFactory
-from ai_council.core.models import ExecutionMode
-
-factory = AICouncilFactory()
-ai_council = factory.create_ai_council_sync()
-response = ai_council.process_request_sync("Your question", ExecutionMode.BALANCED)
-```
-
-### 🙏 Acknowledgments
-
-Special thanks to the Python community and all the open-source projects that made this possible.
+All notable changes to AI Council Orchestrator are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-**Full Changelog**: https://github.com/shrixtacy/Ai-Council/commits/v1.0.0
+## [1.3.0] - Unreleased (Current HEAD)
+
+### Added
+- Context-aware fallback model selection — fallback now considers failure type (rate limit, content filter, reasoning failure) when picking the next model (#144)
+- Distributed locking for circuit breakers using Redis — prevents race conditions in multi-worker deployments (#136)
+- Chat History page with full API integration (#135)
+- Real analytics data wired to frontend with enhanced visualizations (#140)
+
+### Fixed
+- WebSocket endpoint now has authentication and rate limiting (#137)
+- CostOptimizer in-memory cache now persists correctly across calls (#134)
+- Session handling edge cases resolved (#120)
+
+---
+
+## [1.2.0] - February 2025
+
+### Added
+- Redis MQ Execution Agent and Worker System — async task queue for model execution (#118)
+- Live Orchestration Visualizer — real-time pipeline stage visualization in the frontend (#87)
+- Full async pipeline rewrite — entire orchestration pipeline is now fully async (#111)
+- Rate limiting feedback — users now see rate limit status and wait times in the UI (#112)
+- Web app testing suite and CI setup (#101)
+- Complete password reset flow (email-based OTP) (#102)
+
+### Fixed
+- Authentication bypass vulnerability patched (#113)
+- Real-time chat API wired correctly with request race guard (#116)
+- Hardcoded timeouts refactored to config-driven values (#115)
+- Removed fragile `sys.path.insert` usages in web backend (#110)
+- Hardcoded email credentials removed from source code (#98)
+- `process_request` refactored for correctness and clarity (#107)
+- Request timeout enforced at the `AICouncil` level (#100)
+- Structured logging standardized across all components (#119)
+
+### Security
+- CORS configuration hardened (#57)
+- Environment variable validation enforced at startup (#63)
+- WebSocket authentication added (#137)
+
+---
+
+## [1.1.0] - January 2025
+
+### Added
+- Full-stack authentication system — register, login, JWT sessions, MongoDB user storage (#65, #77)
+- Dark mode, query history, and keyboard shortcuts in the web UI (#36)
+- Mode comparison example (#35)
+- Enhanced error handling in `process_request` (#88)
+- Loading states and error handling in the frontend (#99)
+- CLI refactored into `CLIHandler` class (#84)
+- Space Grotesk and Inter fonts added to UI (#103)
+- Contributors section added to README (#109)
+
+### Fixed
+- Backend dependency on core package resolved (#59)
+- Model timeouts and capabilities aligned in example config (#58)
+- Frontend served correctly via `http.server` on startup (#56)
+- Gemini model versions corrected (2.5 → 1.5) across config (#55)
+- Broken emoji and markdown typos in docs (#45)
+
+### Infrastructure
+- GitHub Actions workflows for issue assignment and PR-issue linking (#64, #47)
+- CI badges added to README (#27)
+- Cross-platform publish script with Windows fixes (#79)
+
+---
+
+## [1.0.0] - December 26, 2024
+
+Initial release on PyPI as `ai-council-orchestrator`.
+
+### Core Engine
+- 5-layer orchestration pipeline: Analysis → Routing → Execution → Arbitration → Synthesis
+- Three execution modes: FAST, BALANCED, BEST_QUALITY
+- `AICouncilFactory` for dependency injection
+- YAML-based configuration system
+
+### Analysis Layer
+- Rule-based intent classification (question, instruction, analysis, creation, modification, verification)
+- Complexity scoring (trivial → very complex)
+- Task type classification (reasoning, code generation, research, fact-checking, etc.)
+
+### Routing Layer
+- `ModelRegistry` with capability, cost, and performance profiles per model
+- `ModelContextProtocol` for scored model selection
+- Fallback chain pre-building at routing time
+- Routing decision cache
+
+### Execution Layer
+- `BaseExecutionAgent` with retry and exponential backoff
+- Per-provider rate limiting (OpenAI, Anthropic, default)
+- Adaptive timeout management
+- Circuit breakers per model
+- `SelfAssessment` generation per response (confidence, assumptions, risk, cost, tokens)
+
+### Arbitration Layer
+- Conflict detection between multiple model responses
+- Confidence-based resolution
+- Quality threshold filtering
+
+### Synthesis Layer
+- Redundancy removal across validated responses
+- Content combination and normalization
+- Execution metadata attachment (models used, cost breakdown, execution path)
+
+### Cost Optimizer
+- Mode-based weighting (cost / speed / quality / reliability)
+- Per-model performance history tracking
+- Cost estimation with task-type multipliers
+- Disk-cached optimization results (24h TTL)
+
+### Resilience
+- Circuit breakers on every pipeline component with independent thresholds
+- Graceful degradation on partial failures (>50% subtask failure threshold)
+- Failure isolation for repeatedly failing models
+
+### Web Application
+- React 18 frontend with Tailwind CSS, Zustand, Recharts, Framer Motion
+- FastAPI backend with REST + WebSocket
+- Express + MongoDB auth service with JWT and email-based password reset
+
+### Real Model Adapters
+- OpenAI, Anthropic, Google (Gemini), xAI (Grok), Groq — via raw `httpx`
+- Mock models for development and testing
+
+### Infrastructure
+- Structured logging via `structlog`
+- 95 tests, 45% code coverage
+- Full type hints throughout
+- Both sync and async APIs
+
+---
+
+## Tags Reference
+
+| Tag | Date | Description |
+|-----|------|-------------|
+| `v1.0.0` | Dec 26, 2024 | Official PyPI release |
+| `v1.0.0-backend` | Feb 2025 | Backend milestone complete |
+| `v1.0.0-frontend` | Feb 2025 | Frontend milestone complete |
+| `v1.3.0` | Current | See above |
