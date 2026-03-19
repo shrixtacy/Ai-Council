@@ -33,6 +33,25 @@ describe('Auth Endpoints', () => {
   let createdUserId;
   let createdOtp;
 
+  it('should return a minimal safe health payload without email configuration details', async () => {
+    const res = await request(app).get('/health');
+
+    expect(res.statusCode).toEqual(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe('AI Council Auth Backend is running');
+    expect(res.body.status).toBe('ok');
+    expect(res.body.service).toBe('ai-council-auth-backend');
+    expect(typeof res.body.version).toBe('string');
+    expect(typeof res.body.uptime).toBe('number');
+    expect(res.body.uptime).toBeGreaterThanOrEqual(0);
+
+    expect(res.body.email).toBeUndefined();
+    expect(JSON.stringify(res.body).toLowerCase()).not.toContain('smtp');
+    expect(JSON.stringify(res.body).toLowerCase()).not.toContain('email_host');
+    expect(JSON.stringify(res.body).toLowerCase()).not.toContain('email_user');
+    expect(JSON.stringify(res.body).toLowerCase()).not.toContain('email_password');
+  });
+
   it('should register a new user successfully', async () => {
     const res = await request(app)
       .post('/api/auth/register')

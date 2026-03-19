@@ -47,7 +47,7 @@ class CouncilWorker:
             logger.info("Worker loaded model", extra={"name": name})
 
         from ai_council.execution.agent import BaseExecutionAgent
-        self.execution_agent = BaseExecutionAgent()
+        self.execution_agent = BaseExecutionAgent(model_registry=self.model_registry)
         self.running = False
 
     async def _deserialize_task(self, data: Dict[str, Any]) -> Tuple[Subtask, str]:

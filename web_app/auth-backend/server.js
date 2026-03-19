@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
+const { version } = require("./package.json");
 
 const app = express();
 
@@ -51,10 +52,10 @@ app.get("/health", (req, res) => {
   res.json({
     success: true,
     message: "AI Council Auth Backend is running",
-    email: {
-      configured: !!process.env.EMAIL_PASSWORD,
-      from: process.env.EMAIL_USER,
-    },
+    status: "ok",
+    service: "ai-council-auth-backend",
+    version,
+    uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
   });
 });

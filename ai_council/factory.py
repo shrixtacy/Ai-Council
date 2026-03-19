@@ -362,7 +362,7 @@ class AICouncilFactory:
                 redis_url=self.config.execution.redis_url,
                 timeout_seconds=safe_timeout
             )
-        return BaseExecutionAgent()
+        return BaseExecutionAgent(model_registry=self.model_registry)
     
     def _create_arbitration_layer(self) -> ArbitrationLayer:
         """Create the arbitration layer."""

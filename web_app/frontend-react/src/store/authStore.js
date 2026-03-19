@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-
+import { jwtDecode } from "jwt-decode";
 const useAuthStore = create((set) => ({
   user: null,
   token: null,
@@ -26,10 +26,17 @@ const useAuthStore = create((set) => ({
       try {
         const { state } = JSON.parse(stored);
         if (state.token) {
-          set({ user: state.user, token: state.token, isAuthenticated: true });
+          const decoded = jwtDecode(state.token);
+
+          if (decoded.exp * 1000 > Date.now()) {
+            set({ user: state.user, token: state.token, isAuthenticated: true });
+          } else {
+            localStorage.removeItem('ai-council-auth');
+          }
         }
       } catch (e) {
         console.error('Failed to parse auth state');
+         localStorage.removeItem('ai-council-auth'); 
       }
     }
   }

@@ -6,7 +6,7 @@ import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from ..core.interfaces import ExecutionAgent, AIModel, ModelError, FailureResponse
+from ..core.interfaces import ExecutionAgent, AIModel, ModelError, FailureResponse, ModelRegistry
 from ..core.models import Subtask, AgentResponse, SelfAssessment, RiskLevel
 from ..core.failure_handling import (
     FailureEvent, FailureType, resilience_manager, create_failure_event
@@ -23,13 +23,15 @@ logger = get_logger(__name__)
 class BaseExecutionAgent(ExecutionAgent):
     """Base implementation of ExecutionAgent with comprehensive failure handling."""
     
-    def __init__(self, max_retries: int = 3, retry_delay: float = 1.0):
+    def __init__(self, model_registry: Optional[ModelRegistry] = None, max_retries: int = 3, retry_delay: float = 1.0):
         """Initialize the execution agent.
         
         Args:
+            model_registry: Registry for resolving AI models
             max_retries: Maximum number of retry attempts for failed executions
             retry_delay: Base delay in seconds between retry attempts
         """
+        self.model_registry = model_registry
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self._execution_history: Dict[str, Any] = {}
@@ -52,12 +54,13 @@ class BaseExecutionAgent(ExecutionAgent):
         rate_limit_manager.set_rate_limit("anthropic", 50)  # 50 requests per minute
         rate_limit_manager.set_rate_limit("default", 30)  # Default rate limit
     
-    async def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
+    async def execute(self, subtask: Subtask, model: AIModel, depth: int = 0) -> AgentResponse:
         """Execute a subtask using the specified AI model with comprehensive failure handling.
         
         Args:
             subtask: The subtask to execute
             model: The AI model to use for execution
+            depth: Current fallback depth
             
         Returns:
             AgentResponse: The response including content and self-assessment
@@ -150,7 +153,7 @@ class BaseExecutionAgent(ExecutionAgent):
                     if recovery_action.fallback_model:
                         # Try fallback model
                         return await self._execute_with_fallback(
-                            subtask, recovery_action.fallback_model, start_time
+                            subtask, recovery_action.fallback_model, start_time, depth
                         )
                     elif recovery_action.skip_subtask:
                         # Skip this subtask
@@ -248,41 +251,61 @@ class BaseExecutionAgent(ExecutionAgent):
         self, 
         subtask: Subtask, 
         fallback_model_id: str, 
-        original_start_time: float
+        original_start_time: float,
+        depth: int = 0
     ) -> AgentResponse:
         """Execute subtask with fallback model."""
-        logger.info("Attempting fallback execution with model", extra={"fallback_model_id": fallback_model_id})
+        MAX_FALLBACK_DEPTH = 3
         
-        # TODO: Implement real fallback execution (#113)
-        # We need to resolve the fallback model instance from the ModelRegistry
-        # and dynamically invoke the normal execution path (e.g., self.execute),
-        # instead of returning a hard-coded degraded AgentResponse with 
-        # a default SelfAssessment and RiskLevel.
+        if depth >= MAX_FALLBACK_DEPTH:
+            logger.error(
+                "Maximum fallback depth reached", 
+                extra={"subtask_id": subtask.id, "depth": depth}
+            )
+            return self._create_failure_response(
+                subtask, fallback_model_id, f"Maximum fallback depth of {MAX_FALLBACK_DEPTH} reached", original_start_time
+            )
 
-        # This is a simplified implementation - in practice, you'd need to
-        # get the actual fallback model instance from a registry
-        # For now, return a degraded response
-        execution_time = time.time() - original_start_time
-        
-        return AgentResponse(
-            subtask_id=subtask.id,
-            model_used=fallback_model_id,
-            content="Fallback execution - limited functionality available",
-            self_assessment=SelfAssessment(
-                confidence_score=0.3,
-                risk_level=RiskLevel.HIGH,
-                model_used=fallback_model_id,
-                execution_time=execution_time,
-                assumptions=["Using fallback model with reduced capabilities"]
-            ),
-            timestamp=datetime.utcnow(),
-            success=True,
-            metadata={
-                "fallback_execution": True,
-                "original_failure": True,
-                "degraded_mode": True
+        logger.info(
+            f"Attempting fallback execution (depth {depth + 1})", 
+            extra={
+                "subtask_id": subtask.id,
+                "fallback_model_id": fallback_model_id,
+                "depth": depth + 1
             }
         )
+        
+        if not self.model_registry:
+            logger.error("Model registry not available for fallback resolution")
+            return self._create_failure_response(
+                subtask, fallback_model_id, "Model registry not available", original_start_time
+            )
+
+        fallback_model = self.model_registry.get_model_by_id(fallback_model_id)
+        if not fallback_model:
+            logger.error("Fallback model not found in registry", extra={"model_id": fallback_model_id})
+            return self._create_failure_response(
+                subtask, fallback_model_id, f"Fallback model {fallback_model_id} not found in registry", original_start_time
+            )
+
+        # Recursively call execute with the fallback model
+        response = await self.execute(subtask, fallback_model, depth=depth + 1)
+        
+        # Update metadata to track fallback chain
+        if response.metadata is None:
+            response.metadata = {}
+        
+        # Only set if not already present (deepest call sets it first)
+        if "fallback_depth" not in response.metadata:
+            response.metadata["fallback_depth"] = depth + 1
+        
+        if "is_fallback" not in response.metadata:
+            response.metadata["is_fallback"] = True
+            
+        if "original_start_time" not in response.metadata:
+            response.metadata["original_start_time"] = original_start_time
+
+        return response
     
     def _create_skip_response(
         self, 
