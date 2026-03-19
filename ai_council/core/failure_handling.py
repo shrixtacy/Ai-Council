@@ -603,7 +603,9 @@ class ResilienceManager:
         return health_status
 
 
-# Global resilience manager instance
+# Global resilience manager instance — backward-compatible default.
+# Prefer passing a ResilienceManager via constructor injection (Issue #158).
+# This global will be deprecated in a future release.
 resilience_manager = ResilienceManager()
 
 

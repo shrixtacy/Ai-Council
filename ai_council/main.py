@@ -50,11 +50,7 @@ class AICouncil:
         self.logger = get_logger(__name__)
         self.logger.info("Initializing AI Council application")
         
-        # Update adaptive timeout defaults from configuration
-        from .core.timeout_handler import adaptive_timeout_manager
-        adaptive_timeout_manager.update_defaults(self.config.execution.strategy_timeouts)
-        
-        # Create factory for dependency injection
+        # Create factory for dependency injection (owns all runtime infrastructure)
         self.factory = AICouncilFactory(self.config)
         
         # Validate configuration
@@ -63,6 +59,10 @@ class AICouncil:
             error_msg = "Configuration validation failed:\n" + "\n".join(f"- {issue}" for issue in validation_issues)
             self.logger.error(error_msg)
             raise RuntimeError(error_msg)
+        
+        # Touch the factory's adaptive_timeout_manager to apply config-based timeout defaults.
+        # This replaces the previous approach of importing and mutating the module-level global.
+        _ = self.factory.adaptive_timeout_manager
         
         # Initialize orchestration layer
         self.orchestration_layer: OrchestrationLayer = self.factory.create_orchestration_layer()
@@ -217,9 +217,8 @@ class AICouncil:
                                 if task_type not in m["capabilities"]:
                                     m["capabilities"].append(task_type)
             
-            # Get resilience manager status
-            from .core.failure_handling import resilience_manager
-            health_status = resilience_manager.health_check()
+            # Get resilience manager status from the factory-owned instance (Issue #158)
+            health_status = self.factory.resilience_manager.health_check()
             
             return {
                 "status": "operational",
