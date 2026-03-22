@@ -8,6 +8,7 @@ execution:
   default_timeout_seconds: 60.0
   enable_arbitration: true
   enable_synthesis: true
+  use_mq: false
 
 cost:
   max_cost_per_request: 1.0

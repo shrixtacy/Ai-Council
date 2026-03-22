@@ -1,5 +1,8 @@
 """Implementation of the OrchestrationLayer for main request processing pipeline."""
 
+from http.client import responses
+from difflib import SequenceMatcher
+
 from ai_council.core.logger import get_logger
 import asyncio
 import time
@@ -95,7 +98,6 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         self.partial_failure_threshold = 0.5  # 50% success rate minimum
         
         logger.info("OrchestrationLayer initialized with comprehensive failure handling")
-    
     def _initialize_circuit_breakers(self):
         """Initialize circuit breakers for different components."""
         # Analysis engine circuit breaker
@@ -212,8 +214,8 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         self, 
         subtasks: List[Subtask], 
         execution_plan, 
-        execution_mode: ExecutionMode
-    ) -> List[AgentResponse]:
+        execution_mode: ExecutionMode   
+    ):
         """
         Stage 5: Execute all subtasks with resilience handling.
         
@@ -275,29 +277,63 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         
         return "continue"
     
-    async def _stage_arbitrate(
-        self, 
-        responses: List[AgentResponse]
-    ) -> List[AgentResponse]:
-        """
-        Stage 6: Arbitrate between multiple responses.
-        
-        Args:
-            responses: List of agent responses to arbitrate
-            
-        Returns:
-            List[AgentResponse]: Validated responses after arbitration
-        """
+    async def _stage_arbitrate(self, responses: List[AgentResponse]):
+
         if len(responses) <= 1:
-            return responses
-        
+            return responses, {
+                "selected_model": responses[0].model_used if responses else None,
+                "confidence": responses[0].self_assessment.confidence_score if responses and responses[0].self_assessment else 0.5,
+                "reason": "Only one model response available",
+                "participating_models": [r.model_used for r in responses],
+                "similarity_score": 1.0,
+                "conflict_detected": False
+            }
+
         try:
-            arbitration_result = await self._arbitrate_with_protection(responses)
-            return arbitration_result.validated_responses
+            # ✅ 1. Collect model data
+            model_data = []
+            for r in responses:
+                confidence = r.self_assessment.confidence_score if r.self_assessment else 0.5
+                model_data.append({
+                    "model": r.model_used,
+                    "confidence": confidence,
+                    "content": r.content
+                })
+
+            # ✅ 2. Select best model (highest confidence)
+            best = max(model_data, key=lambda x: x["confidence"])
+
+            # ✅ 3. SIMPLE similarity (text match ratio)
+            contents = [m["content"] for m in model_data]
+            similarity_score = sum(
+                1 for c in contents if c == contents[0]
+            ) / len(contents)
+
+            # ✅ 4. Conflict detection
+            conflict_detected = similarity_score < 0.7
+
+            # ✅ 5. Build explanation
+            explanation = {
+                "selected_model": best["model"],
+                "confidence": best["confidence"],
+                "reason": "Selected highest confidence response",
+                "participating_models": model_data,
+                "similarity_score": round(similarity_score, 2),
+                "conflict_detected": conflict_detected
+            }
+
+            # ✅ 6. Save arbitration decision
+            arbitration_decision = f"Selected {best['model']} with confidence {best['confidence']}"
+
+            # Return best response object
+            best_response_obj = next(r for r in responses if r.model_used == best["model"])
+
+            return [best_response_obj], explanation, [arbitration_decision]
+
         except Exception as e:
             logger.warning("Arbitration failed", extra={"error": str(e)})
-            # Fallback: use first successful response
-            return responses[:1]
+            return [responses[0]], None, []
+
     
     async def _stage_synthesize(
         self, 
@@ -377,6 +413,9 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         """
         start_time = time.time()
         execution_metadata = ExecutionMetadata()
+
+        final_response= None
+        explanation= None
         
         try:
             logger.info("Processing request", extra={"mode": execution_mode.value, "input_sample": user_input[:100]})
@@ -430,18 +469,29 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 )
             
             # Stage 6: Arbitration
-            validated_responses = await self._stage_arbitrate(successful_responses)
+            try:
+                validated_responses, explanation,arbitration_decisions = await self._stage_arbitrate(successful_responses)
+
+            except Exception as e:
+                logger.warning("Arbitration unpacking failed", extra={"error": str(e)})
+                validated_responses = successful_responses[:1]
+                explanation = None
+            
             execution_metadata.execution_path.append("arbitration")
             
             # Stage 7: Synthesis
             final_response = await self._stage_synthesize(validated_responses)
+            final_response.explanation = explanation
+            final_response.arbitration_decisions = arbitration_decisions
             execution_metadata.execution_path.append("synthesis")
             
             # Stage 8: Attach Metadata
             execution_metadata.total_execution_time = time.time() - start_time
             final_response = await self._stage_attach_metadata(final_response, execution_metadata)
             
-            logger.info("Request processed successfully", extra={"execution_time": round(execution_metadata.total_execution_time, 2)})
+            logger.info("Request processed successfully", 
+                extra={"execution_time": round(execution_metadata.total_execution_time, 2)}
+            )
             return final_response
             
         except TimeoutError as e:
@@ -457,18 +507,18 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             execution_time = time.time() - start_time
             
             # Record system failure
-            failure_event = create_failure_event(
-                failure_type=FailureType.SYSTEM_OVERLOAD,
-                component="orchestration_layer",
-                error_message=str(e),
-                context={"execution_time": execution_time}
-            )
-            resilience_manager.handle_failure(failure_event)
+        failure_event = create_failure_event(
+            failure_type=FailureType.SYSTEM_OVERLOAD,
+            component="orchestration_layer",
+            error_message=str(e),
+            context={"execution_time": execution_time}
+        )
+        resilience_manager.handle_failure(failure_event)
             
-            return create_error_response(
-                e,
-                context={'component': 'orchestration_layer.process_request'}
-            )
+        return create_error_response(
+            e,
+            context={'component': 'orchestration_layer.process_request'}
+        )
     
     # =========================================================================
     # PROTECTED METHODS - With circuit breaker protection
@@ -602,11 +652,25 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         
         # Execute parallel groups sequentially
         for group_index, group in enumerate(execution_plan.parallel_groups):
-            group_responses = await self._execute_parallel_group_resilient(group, execution_mode)
+            
+            models = self.model_registry.get_models_for_task_type(group[0].task_type)  # Assuming all subtasks in group have same type
+            
+            
+
+            group_responses = await self._execute_parallel_group_resilient(
+                group,
+                models,
+                timeout_handler,
+                adaptive_timeout_manager 
+            )   
+                                                                           
             all_responses.extend(group_responses)
             
             # Check group success rate
-            group_success_rate = sum(1 for resp in group_responses if resp.success) / len(group_responses)
+            if group_responses:
+                group_success_rate = sum(1 for resp in group_responses if resp.success) / len(group_responses)
+            else:
+                group_success_rate = 0.0
             if group_success_rate < 0.5:
                 failed_groups += 1
                 logger.warning("Group had low success rate", extra={"group_index": group_index, "success_rate": group_success_rate})
@@ -619,120 +683,91 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         return all_responses
     
     async def _execute_parallel_group_resilient(
-        self, 
-        subtasks: List[Subtask], 
-        execution_mode: ExecutionMode
-    ) -> List[AgentResponse]:
-        """Execute a group of subtasks with resilience mechanisms."""
-        coros = [self._execute_single_subtask(subtask, execution_mode) for subtask in subtasks]
-        responses = await asyncio.gather(*coros)
-        
-        return list(responses)
-    
-    async def _execute_single_subtask(
-        self, 
-        subtask: Subtask, 
-        execution_mode: ExecutionMode
-    ) -> AgentResponse:
-        """Execute a single subtask with full error handling."""
-        try:
-            # Check system health before execution
-            health = resilience_manager.health_check()
-            if health["overall_health"] == "degraded" and execution_mode == ExecutionMode.FAST:
-                if subtask.priority.value in ["low", "medium"]:
-                    logger.info("Skipping subtask", extra={"id": subtask.id})
-                    return AgentResponse(
-                        subtask_id=subtask.id,
-                        model_used="skipped",
-                        content="",
-                        success=False,
-                        error_message="Skipped due to system degradation",
-                        metadata={"skipped": True, "reason": "system_degraded"}
-                    )
-            
-            # Get available models
-            available_models = [
-                m.get_model_id() 
-                for m in self.model_registry.get_models_for_task_type(subtask.task_type)
-            ]
-            
-            if not available_models:
-                logger.error("No models available for task type", extra={"task_type": subtask.task_type})
-                return AgentResponse(
-                    subtask_id=subtask.id,
-                    model_used="none_available",
-                    content="",
-                    success=False,
-                    error_message=f"No models available for task type {subtask.task_type}"
-                )
-            
-            # Use cost optimizer for model selection
-            optimization = self.cost_optimizer.optimize_model_selection(
-                subtask, execution_mode, available_models
-            )
-            
-            logger.info("Cost-optimized selection", extra={"reasoning": optimization.reasoning})
-            
-            # Get the actual model instance
-            models = self.model_registry.get_models_for_task_type(subtask.task_type)
-            selected_model = next(
-                (m for m in models if m.get_model_id() == optimization.recommended_model),
-                None
-            )
-            
-            if not selected_model:
-                logger.error("Optimized model", extra={"recommended_model": optimization.recommended_model})
-                return AgentResponse(
-                    subtask_id=subtask.id,
-                    model_used=optimization.recommended_model,
-                    content="",
-                    success=False,
-                    error_message=f"Selected model {optimization.recommended_model} not available"
-                )
-            
-            # Execute subtask with timeout protection
-            response = await timeout_handler.execute_with_timeout(
-                self.execution_agent.execute,
-                adaptive_timeout_manager.get_adaptive_timeout("subtask_execution"),
-                "subtask_execution",
-                "orchestration_layer",
-                subtask.id,
-                selected_model.get_model_id(),
+        self,
+        parallel_group,
+        models,
+        timeout_handler,
+        adaptive_timeout_manager,
+    ):
+        coros = [
+            self._execute_single_subtask(
                 subtask,
-                selected_model
+                models,
+                timeout_handler,
+                adaptive_timeout_manager
             )
-            
-            # Update cost optimizer with actual performance
-            if response.success and response.self_assessment:
-                self.cost_optimizer.update_performance_history(
-                    optimization.recommended_model,
-                    response.self_assessment.estimated_cost,
-                    response.self_assessment.confidence_score
-                )
-            
-            return response
-            
-        except TimeoutError as e:
-            logger.warning("Subtask timed out", extra={"subtask_id": subtask.id, "error": str(e)})
-            return AgentResponse(
-                subtask_id=subtask.id,
-                model_used="timeout",
-                content="",
-                success=False,
-                error_message=f"Execution timed out: {str(e)}",
-                metadata={"timeout": True, "timeout_duration": e.timeout_duration}
-            )
-            
-        except Exception as e:
-            logger.error("Failed to execute subtask", extra={"subtask_id": subtask.id, "error": str(e)})
-            return AgentResponse(
-                subtask_id=subtask.id,
-                model_used="unknown",
-                content="",
-                success=False,
-                error_message=str(e)
-            )
+            for subtask in parallel_group
+        ]
+
+        responses = await asyncio.gather(*coros)
+
+    # 🔥 FLATTEN RESPONSES
+        final_responses = []
+        for r in responses:
+            if isinstance(r, list):
+                final_responses.extend(r)
+            else:
+                final_responses.append(r)
+
+        return final_responses
     
+
+    async def _execute_single_subtask(
+        self,
+        subtask: Subtask,
+        models,
+        timeout_handler,
+        adaptive_timeout_manager
+    ) -> List[AgentResponse]:
+        """Execute a single subtask across multiple models."""
+        responses = []
+
+        try:
+        
+
+            for model in models:
+                try:
+                    response = await timeout_handler.execute_with_timeout(
+                        self.execution_agent.execute,
+                        adaptive_timeout_manager.get_adaptive_timeout("subtask_execution"),
+                        "subtask_execution",
+                        "orchestration_layer",
+                        subtask.id,
+                        model.get_model_id(),
+                        subtask,
+                        model
+                    )
+
+                    responses.append(response)
+
+                except Exception as e:
+                    logger.error(
+                        "Model execution failed",
+                        extra={
+                            "subtask_id": subtask.id,
+                            "model": model.get_model_id(),
+                            "error": str(e)
+                        }
+                    )
+
+            return responses
+
+        except Exception as e:
+            logger.error(
+                "Subtask execution failed",
+                extra={"subtask_id": subtask.id, "error": str(e)}
+            )
+
+            return [
+                AgentResponse(
+                    subtask_id=subtask.id,
+                    model_used="error",
+                    content="",
+                    success=False,
+                    error_message=str(e)
+                )
+            ]
+
     # =========================================================================
     # PUBLIC METHODS - Required by interface
     # =========================================================================

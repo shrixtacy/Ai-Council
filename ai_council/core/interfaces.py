@@ -260,6 +260,7 @@ class ArbitrationResult:
     def __init__(self, validated_responses: List[AgentResponse], conflicts_resolved: List[Resolution]):
         self.validated_responses = validated_responses
         self.conflicts_resolved = conflicts_resolved
+        self.explanation= explanation
 
 
 class ArbitrationLayer(ABC):

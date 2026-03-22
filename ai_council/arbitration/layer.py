@@ -1,5 +1,9 @@
 """Implementation of the ArbitrationLayer for conflict resolution between agent responses."""
 
+from http.client import responses
+from difflib import SequenceMatcher
+
+
 from ai_council.core.logger import get_logger
 from typing import List, Dict, Set, Optional
 from datetime import datetime
@@ -9,6 +13,21 @@ from ..core.models import AgentResponse, RiskLevel
 
 
 logger = get_logger(__name__)
+class ArbitrationExplanation:
+    def __init__(self, models_used, conflicts, decisions):
+        self.models_used = models_used
+        self.conflicts = conflicts
+        self.decisions = decisions
+        self.timestamp = datetime.now()
+
+    def to_dict(self):
+        return {
+            "models_used": self.models_used,
+            "conflicts": self.conflicts,
+            "decisions": self.decisions,
+            "timestamp": str(self.timestamp),
+            "extra": getattr(self, "extra", None)
+        }
 
 
 class ConcreteArbitrationLayer(ArbitrationLayer):
@@ -35,7 +54,16 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         self.quality_weight = quality_weight
         logger.info("ArbitrationLayer initialized", extra={"confidence_threshold": confidence_threshold, "quality_weight": quality_weight})
     
+    def _calculate_similarity(self, responses):
+        scores = []
+        for i in range(len(responses)):
+            for j in range(i + 1, len(responses)):
+                s = SequenceMatcher(None, responses[i].content, responses[j].content).ratio()
+                scores.append(s)
+        return sum(scores) / len(scores) if scores else 1.0
+
     async def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
+        print("DEBUG: Responses received:", responses) 
         """
         Arbitrate between multiple agent responses to resolve conflicts.
         
@@ -61,26 +89,104 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         
         logger.info("Starting arbitration for", extra={"count": len(responses)})
         
+        # ✅ Capture models used for explainability
+        models_used = [r.model_used for r in responses]
+        # ✅ Remove duplicates
+        models_used = list(set(models_used))
+
+        # ✅ Confidence scores per model
+        confidence_scores = [
+            {
+                "model": r.model_used,
+                "confidence": r.self_assessment.confidence_score if r.self_assessment else 0.5
+            }
+            for r in responses
+        ]
+
+        # ✅ Similarity score
+        similarity_score = self._calculate_similarity(responses)
+
+        
         # Step 1: Detect conflicts between responses
         conflicts = await self.detect_conflicts(responses)
+        conflict_detected = len(conflicts) > 0
+
         logger.info("Detected", extra={"count": len(conflicts)})
-        
+        # ✅ Prepare conflict info for explainability
+        conflict_info = [
+            {
+                "type": c.conflict_type,
+                "description": c.description,
+                "responses": c.response_ids
+            }
+            for c in conflicts
+        ]
+
+
         # Step 2: Resolve each conflict
         resolutions = []
+        decisions = []
+
         for conflict in conflicts:
             try:
                 resolution = await self.resolve_contradiction(conflict)
                 resolutions.append(resolution)
+
+            # ✅ Track decision details for explainability
+                decisions.append({
+                    "conflict_type": conflict.conflict_type,
+                    "chosen_response": resolution.chosen_response_id,
+                    "reason": resolution.reasoning,
+                    "confidence": resolution.confidence
+                })
+
                 logger.info("Resolved conflict", extra={"conflict_type": conflict.conflict_type})
             except Exception as e:
-                logger.error("Failed to resolve conflict", extra={"conflict_type": conflict.conflict_type, "error": str(e)})
+                logger.error(
+                    "Failed to resolve conflict", 
+                    extra={"conflict_type": conflict.conflict_type, "error": str(e)}
+                )
+                
         
         # Step 3: Build validated response list based on resolutions
         validated_responses = self._build_validated_responses(responses, conflicts, resolutions)
+
+        selected_response = validated_responses[0] if validated_responses else None
+        selected_model = selected_response.model_used if selected_response else None
+
+
+        extra_explanation = None
+        if selected_response:
+            extra_explanation = self.build_explanation(responses, selected_response)
+
         
-        logger.info("Arbitration complete", extra={"validated_responses": len(validated_responses), "resolutions": len(resolutions)})
-        return ArbitrationResult(validated_responses=validated_responses, conflicts_resolved=resolutions)
+        logger.info(
+            "Arbitration complete", 
+            extra={"validated_responses": len(validated_responses), "resolutions": len(resolutions)}
+        )
     
+        # ✅ Create explanation object
+        explanation = ArbitrationExplanation(
+            models_used=models_used,
+            conflicts=conflict_info,
+            decisions=decisions
+        )
+
+        # 🔥 ADD THESE NEW FIELDS
+        explanation.similarity_score = round(similarity_score, 3)
+        explanation.conflict_detected = conflict_detected
+        explanation.confidence_scores = confidence_scores
+        explanation.selected_model = selected_model
+
+        explanation.extra = extra_explanation
+    
+        # ✅ Return ArbitrationResult with explanation
+        return ArbitrationResult(
+            validated_responses=validated_responses,
+            conflicts_resolved=resolutions,
+            explanation=explanation
+        )
+
     async def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
         """
         Detect conflicts between multiple agent responses.
@@ -352,6 +458,53 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
                     validated.append(response)
         
         return validated
+    
+    def build_explanation(self, responses, selected_response):
+        models_compared = []
+
+        for resp in responses:
+            models_compared.append({
+                "model": resp.model_used,
+                "confidence": (
+                    resp.self_assessment.confidence_score
+                    if resp.self_assessment else 0.5
+                ),
+                "content": resp.content[:100]
+            })
+        
+        similarity = None
+
+        if len(responses) >= 2:
+            similarity = self.simple_similarity(
+            responses[0].content,
+            responses[1].content
+        )
+
+        explanation = {
+            "selected_model": selected_response.model_used,
+            "reason": "Highest confidence score",
+            "models_compared": models_compared,
+            "similarity_score": similarity,
+            "conflict_detected": True if len(responses) > 1 else False
+
+        }
+
+        return explanation
+    
+
+    def simple_similarity(self, text1, text2):
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+
+        common = words1.intersection(words2)
+        total = words1.union(words2)
+
+        if not total:
+            return 0
+
+        return len(common) / len(total)
+
+
 
 
 class NoOpArbitrationLayer(ArbitrationLayer):

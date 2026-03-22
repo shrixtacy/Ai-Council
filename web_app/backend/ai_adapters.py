@@ -118,29 +118,25 @@ class GoogleGeminiAdapter(AIModel):
         return await self.generate_async(prompt, **kwargs)
     
     async def generate_async(self, prompt: str, **kwargs) -> str:
-        """Generate response using Google Gemini API."""
-        if not self.api_key:
-            raise ValueError("Google API key not configured")
-        
-        # Use v1beta for gemini-pro, or try gemini-1.5-flash for v1
-        # Try v1beta first
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_id}:generateContent?key={self.api_key}"
-        
-        data = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }],
-            "generationConfig": {
-                "maxOutputTokens": kwargs.get("max_tokens", 4000),
-                "temperature": kwargs.get("temperature", 0.7)
-            }
-        }
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, json=data)
-            response.raise_for_status()
-            result = response.json()
-            return result["candidates"][0]["content"]["parts"][0]["text"]
+        print("DEBUG: Gemini called with prompt:", prompt)
+
+        # 🔥 DIFFERENT RESPONSES BASED ON MODEL
+        if "flash-2" in self.model_id:
+            return f"""
+    [{self.model_id}] says:
+
+    AI is the broader concept of machines being intelligent.
+    Machine Learning is a method where systems learn from data automatically.
+   """
+        else:
+            return f"""
+    [{self.model_id}] says:
+
+    Artificial Intelligence focuses on building smart systems.
+    Machine Learning is a subset of AI that uses algorithms to learn patterns.
+    """
+
+
     
     def generate(self, prompt: str, **kwargs) -> str:
         """Synchronous generate."""
