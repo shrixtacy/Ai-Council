@@ -11,8 +11,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
 
-shutdown_event = asyncio.Event()
-
 import jwt
 
 from dotenv import load_dotenv
@@ -76,9 +74,6 @@ async def lifespan(app: FastAPI):
 
         print("🛑 Shutdown initiated...")
 
-        # NEW: Signal shutdown to stop accepting new work
-        shutdown_event.set()
-
         # NEW: Gracefully close all active WebSocket connections
         print("Closing WebSockets...")
 
@@ -100,7 +95,7 @@ async def lifespan(app: FastAPI):
         raise
 
     except Exception as exc:
-        print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
+        print(f"[ERROR] AI Council lifecycle error: {str(exc)}")
         raise
 
 
