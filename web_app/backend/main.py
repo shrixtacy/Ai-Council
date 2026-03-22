@@ -11,6 +11,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List
 
+shutdown_event = asyncio.Event()
+active_tasks = set()
+
 import jwt
 
 from dotenv import load_dotenv
@@ -57,7 +60,7 @@ class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize AI Council on startup."""
+    """Initialize AI Council on startup and handle graceful shutdown."""
     try:
         config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
         if config_path.exists():
@@ -65,7 +68,33 @@ async def lifespan(app: FastAPI):
 
         app.state.ai_council = AICouncil(config_path if config_path.exists() else None)
         print("[OK] AI Council initialized successfully")
+
+        # Application runs here
         yield
+
+        # NEW: GRACEFUL SHUTDOWN LOGIC
+    
+
+        print("🛑 Shutdown initiated...")
+
+        # NEW: Signal shutdown to stop accepting new work
+        shutdown_event.set()
+
+        # NEW: Wait for in-flight async tasks to complete
+        if active_tasks:
+            print(f"Waiting for {len(active_tasks)} tasks...")
+            await asyncio.wait(active_tasks, timeout=10)
+
+        # NEW: Gracefully close all active WebSocket connections
+        print("Closing WebSockets...")
+        for ws in ws_manager.active_connections_set:
+            try:
+                await ws.close(code=1001)  # Normal closure
+            except Exception:
+                pass  # Ignore errors during shutdown
+
+        print("✅ Shutdown complete")
+
     except RuntimeError as exc:
         if "Configuration validation failed" in str(exc):
             print("\n" + "=" * 60)
@@ -73,14 +102,14 @@ async def lifespan(app: FastAPI):
             print("=" * 60)
             print(str(exc).replace("Configuration validation failed:", "").strip())
             print("=" * 60 + "\n")
-            raise
-        print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
-    except Exception as exc:  # pragma: no cover - defensive startup logging
+
+    except Exception as exc:
         print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
 
 
+# 🔹 Existing FastAPI app initialization (no change, just uses updated lifespan)
 app = FastAPI(title="AI Council API", version="1.0.0", lifespan=lifespan)
 
 # Load environment variables
@@ -263,6 +292,8 @@ class WebSocketManager:
         self.active_connections: int = 0
         self.ip_connections: Dict[str, int] = {}
         self.message_timestamps: Dict[WebSocket, List[float]] = {}
+        self.active_connections_set = set()  # NEW: Track active WebSocket connections
+        
 
         self.MAX_CONNECTIONS = 1000
         self.MAX_IP_CONNECTIONS = 10
@@ -299,6 +330,9 @@ class WebSocketManager:
         self.active_connections += 1
         self.ip_connections[client_ip] = current_ip_count + 1
         self.message_timestamps[websocket] = []
+
+        self.active_connections_set.add(websocket)  # NEW: Track active WebSocket connections
+
         return True
 
     def disconnect(self, websocket: WebSocket, client_ip: str):
@@ -309,6 +343,7 @@ class WebSocketManager:
                 self.ip_connections[client_ip] = max(0, self.ip_connections[client_ip] - 1)
                 if self.ip_connections[client_ip] == 0:
                     del self.ip_connections[client_ip]
+        self.active_connections_set.discard(websocket)  # NEW: Remove connection safely
 
     def check_rate_limit(self, websocket: WebSocket) -> bool:
         """Returns True if limits are exceeded."""
