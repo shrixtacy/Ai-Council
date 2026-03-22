@@ -97,6 +97,8 @@ class ExecutionConfig:
     enable_synthesis: bool = True
     default_accuracy_requirement: float = 0.8
     strategy_timeouts: Dict[str, float] = field(default_factory=dict)
+    use_mq: bool = False
+    redis_url: str = "redis://localhost:6379/0"
 
 
 @dataclass
@@ -296,6 +298,8 @@ class AICouncilConfig:
                 'enable_synthesis': self.execution.enable_synthesis,
                 'default_accuracy_requirement': self.execution.default_accuracy_requirement,
                 'strategy_timeouts': self.execution.strategy_timeouts,
+                'use_mq': self.execution.use_mq,
+                'redis_url': self.execution.redis_url,
             },
             'cost': {
                 'max_cost_per_request': self.cost.max_cost_per_request,

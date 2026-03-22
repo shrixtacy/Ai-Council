@@ -612,6 +612,19 @@ class ResilienceManager:
                 try:
                     recovery_action = handler.handle(failure)
                     
+                    
+                    # Attach fallback models sequence if available and should_retry is False
+                    if not recovery_action.should_retry and not recovery_action.fallback_model:
+                        for h in self.handlers:
+                            if isinstance(h, ModelUnavailableHandler):
+                                fallback_models = h.fallback_registry.get(failure.model_id, [])
+                                if fallback_models:
+                                    if recovery_action.metadata is None:
+                                        recovery_action.metadata = {}
+                                    recovery_action.metadata["fallback_models"] = fallback_models
+                                    recovery_action.fallback_model = fallback_models[0]
+                                break
+                    
                     # Update failure event with resolution
                     failure.resolution_strategy = recovery_action.action_type
                     if not recovery_action.should_retry:
@@ -626,11 +639,30 @@ class ResilienceManager:
         
         # No handler found, return default action
         logger.warning("No handler found for failure type", extra={"failure_type": failure.failure_type.value})
-        return RecoveryAction(
+        recovery_action = RecoveryAction(
             action_type="unhandled_failure",
             should_retry=False,
             error_message=f"No handler available for {failure.failure_type.value}"
         )
+        
+        # Attach fallback models sequence if available and should_retry is False
+        if not recovery_action.should_retry and not recovery_action.fallback_model:
+            for h in self.handlers:
+                if isinstance(h, ModelUnavailableHandler):
+                    fallback_models = h.fallback_registry.get(failure.model_id, [])
+                    if fallback_models:
+                        if recovery_action.metadata is None:
+                            recovery_action.metadata = {}
+                        recovery_action.metadata["fallback_models"] = fallback_models
+                        recovery_action.fallback_model = fallback_models[0]
+                    break
+        
+        # Update failure event with resolution
+        failure.resolution_strategy = recovery_action.action_type
+        if not recovery_action.should_retry:
+            failure.resolved = True
+            
+        return recovery_action
     
     def update_fallback_registry(self, fallback_registry: Dict[str, List[str]]):
         """Update fallback model registry for model unavailable handler."""
@@ -735,7 +767,9 @@ class ResilienceManager:
         return health_status
 
 
-# Global resilience manager instance
+# Global resilience manager instance — backward-compatible default.
+# Prefer passing a ResilienceManager via constructor injection (Issue #158).
+# This global will be deprecated in a future release.
 resilience_manager = ResilienceManager()
 
 

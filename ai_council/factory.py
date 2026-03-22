@@ -13,6 +13,8 @@ from .core.interfaces import (
     ExecutionAgent, ArbitrationLayer, SynthesisLayer, ModelRegistry, AIModel
 )
 from .core.models import ModelCapabilities, CostProfile, PerformanceMetrics, TaskType
+from .core.failure_handling import ResilienceManager
+from .core.timeout_handler import TimeoutHandler, AdaptiveTimeoutManager, RateLimitManager
 from .utils.config import AICouncilConfig, ModelConfig
 from .utils.logging import get_logger
 
@@ -55,7 +57,57 @@ class AICouncilFactory:
         self._arbitration_layer: Optional[ArbitrationLayer] = None
         self._synthesis_layer: Optional[SynthesisLayer] = None
         
+        # Cache for runtime infrastructure managers (Issue #158)
+        self._resilience_manager: Optional[ResilienceManager] = None
+        self._timeout_handler: Optional[TimeoutHandler] = None
+        self._adaptive_timeout_manager: Optional[AdaptiveTimeoutManager] = None
+        self._rate_limit_manager: Optional[RateLimitManager] = None
+        
         self.logger.info("AI Council factory initialized")
+    
+    # ---------------------------------------------------------------------------
+    # Runtime infrastructure managers (Issue #158 — factory-owned singletons)
+    # ---------------------------------------------------------------------------
+    
+    @property
+    def resilience_manager(self) -> ResilienceManager:
+        """Get or create the resilience manager (factory-scoped)."""
+        if self._resilience_manager is None:
+            self._resilience_manager = ResilienceManager()
+            self.logger.debug("ResilienceManager created by factory")
+        return self._resilience_manager
+    
+    @property
+    def timeout_handler(self) -> TimeoutHandler:
+        """Get or create the timeout handler, injected with this factory's resilience_manager."""
+        if self._timeout_handler is None:
+            self._timeout_handler = TimeoutHandler(resilience_manager=self.resilience_manager)
+            self.logger.debug("TimeoutHandler created by factory")
+        return self._timeout_handler
+    
+    @property
+    def adaptive_timeout_manager(self) -> AdaptiveTimeoutManager:
+        """Get or create the adaptive timeout manager, pre-configured from config."""
+        if self._adaptive_timeout_manager is None:
+            self._adaptive_timeout_manager = AdaptiveTimeoutManager()
+            # Apply per-operation timeout overrides from configuration
+            self._adaptive_timeout_manager.update_defaults(
+                self.config.execution.strategy_timeouts
+            )
+            self.logger.debug("AdaptiveTimeoutManager created by factory")
+        return self._adaptive_timeout_manager
+    
+    @property
+    def rate_limit_manager(self) -> RateLimitManager:
+        """Get or create the rate limit manager, injected with this factory's resilience_manager."""
+        if self._rate_limit_manager is None:
+            self._rate_limit_manager = RateLimitManager(resilience_manager=self.resilience_manager)
+            self.logger.debug("RateLimitManager created by factory")
+        return self._rate_limit_manager
+    
+    # ---------------------------------------------------------------------------
+    # Existing component properties
+    # ---------------------------------------------------------------------------
     
     @property
     def model_registry(self) -> ModelRegistry:

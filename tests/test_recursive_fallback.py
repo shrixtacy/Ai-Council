@@ -102,3 +102,58 @@ async def test_recursive_fallback_max_depth():
         assert "Maximum fallback depth" in response.error_message
     finally:
         resilience_manager.handle_failure = original_handle_failure
+
+@pytest.mark.asyncio
+async def test_fallback_chain_iteration():
+    # Setup registry
+    registry = ModelRegistryImpl()
+    
+    # Models
+    model_primary = MockFailingModel("model-primary")
+    model_fallback_1 = MockFailingModel("model-fallback-1")
+    model_fallback_2 = MockFailingModel("model-fallback-2")
+    model_fallback_3 = MockSuccessModel("model-fallback-3")
+    
+    for m in [model_primary, model_fallback_1, model_fallback_2, model_fallback_3]:
+        registry.register_model(m, ModelCapabilities(task_types=[TaskType.REASONING]))
+        
+    agent = BaseExecutionAgent(model_registry=registry, max_retries=0)
+    
+    from ai_council.core.failure_handling import resilience_manager, RecoveryAction, CircuitBreakerState
+    
+    # Reset circuit breaker to avoid test pollution
+    cb = resilience_manager.get_circuit_breaker("model_api")
+    if cb:
+        cb.state = CircuitBreakerState.CLOSED
+        cb.store.reset_failure_count("model_api")
+        cb.store.clear_failure_times("model_api")
+    
+    original_handle_failure = resilience_manager.handle_failure
+    
+    def mocked_handle_failure(event):
+        # We simulate that the primary model fails and returns the full chain in metadata
+        if event.model_id == "model-primary":
+            return RecoveryAction(
+                action_type="unhandled_failure", 
+                should_retry=False, 
+                metadata={"fallback_models": ["model-fallback-1", "model-fallback-2", "model-fallback-3"]}
+            )
+        # For the fallbacks, they just fail normally
+        return RecoveryAction(action_type="fail")
+        
+    resilience_manager.handle_failure = mocked_handle_failure
+    
+    try:
+        subtask = Subtask(content="Test task", task_type=TaskType.REASONING)
+        response = await agent.execute(subtask, model_primary)
+        
+        assert response.success is True
+        assert response.model_used == "model-fallback-3"
+        assert "Successful response from model-fallback-3" in response.content
+        # Check that fallback failures are tracked
+        assert "fallback_failures" in response.metadata
+        assert len(response.metadata["fallback_failures"]) == 2
+        assert response.metadata["fallback_failures"][0]["model_id"] == "model-fallback-1"
+        assert response.metadata["fallback_failures"][1]["model_id"] == "model-fallback-2"
+    finally:
+        resilience_manager.handle_failure = original_handle_failure

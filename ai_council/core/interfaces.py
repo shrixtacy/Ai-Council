@@ -211,15 +211,17 @@ class ExecutionAgent(ABC):
         pass
     
     @abstractmethod
-    async def generate_self_assessment(self, response: str, subtask: Subtask) -> SelfAssessment:
-        """Generate a self-assessment of the agent's performance.
+    async def generate_self_assessment(self, response: str, subtask: Subtask, model_id: str) -> SelfAssessment:
+        """
+        Generate a self-assessment for a model's response.
         
         Args:
-            response: The generated response content
+            response: The model's response content
             subtask: The subtask that was executed
+            model_id: The ID of the model used
             
         Returns:
-            SelfAssessment: Structured self-assessment metadata
+            SelfAssessment: The generated assessment
         """
         pass
     

@@ -137,7 +137,7 @@ class MQExecutionAgent(ExecutionAgent):
             logger.error("Failed to deserialize worker response", extra={"error": str(e)})
             raise
 
-    async def generate_self_assessment(self, response: str, subtask: Subtask) -> SelfAssessment:
+    async def generate_self_assessment(self, response: str, subtask: Subtask, model_id: str) -> SelfAssessment:
         return SelfAssessment()
 
     async def handle_model_failure(self, error: ModelError) -> FailureResponse:
