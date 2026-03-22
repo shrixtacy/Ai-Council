@@ -17,9 +17,20 @@ class IntentClassifier:
                 "Write a Python program",
                 "Create a function"
             ],
-            "FACTUAL": [
-                "India is a country",
-                "Python was created by Guido"
+            "CREATION": [
+                "Create a website",
+                "Build a project",
+                "Generate code"
+            ],
+            "MODIFICATION": [
+                "Modify this code",
+                "Update the function",
+                "Improve this script"
+            ],
+            "VERIFICATION": [
+                "Check if this is correct",
+                "Validate this output",
+                "Is this right?"
             ]
         }
 
@@ -42,4 +53,4 @@ class IntentClassifier:
                 best_score = score
                 best_intent = intent
 
-        return best_intent
+        return best_intent if best_intent else "INSTRUCTION"

@@ -1,7 +1,5 @@
 """Execution agent implementation for AI Council."""
-from email.mime import text
 
-import tiktoken
 import time
 import re
 from ai_council.core.logger import get_logger
@@ -42,7 +40,6 @@ class BaseExecutionAgent(ExecutionAgent):
         # Initialize circuit breakers for different failure types
         from ..core.failure_handling import CircuitBreakerConfig
 
-        self.encoding = tiktoken.encoding_for_model("gpt-4")
 
         # Circuit breaker for model API calls
         api_cb_config = CircuitBreakerConfig(

@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 shutdown_event = asyncio.Event()
-active_tasks = set()
 
 import jwt
 
@@ -80,14 +79,10 @@ async def lifespan(app: FastAPI):
         # NEW: Signal shutdown to stop accepting new work
         shutdown_event.set()
 
-        # NEW: Wait for in-flight async tasks to complete
-        if active_tasks:
-            print(f"Waiting for {len(active_tasks)} tasks...")
-            await asyncio.wait(active_tasks, timeout=10)
-
         # NEW: Gracefully close all active WebSocket connections
         print("Closing WebSockets...")
-        for ws in ws_manager.active_connections_set:
+        
+        for ws in list(ws_manager.active_connections_set):
             try:
                 await ws.close(code=1001)  # Normal closure
             except Exception:
