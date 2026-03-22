@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
 
         # NEW: Gracefully close all active WebSocket connections
         print("Closing WebSockets...")
-        
+
         for ws in list(ws_manager.active_connections_set):
             try:
                 await ws.close(code=1001)  # Normal closure
@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
         raise
 
 
-# 🔹 Existing FastAPI app initialization (no change, just uses updated lifespan)
+# Existing FastAPI app initialization (no change, just uses updated lifespan)
 app = FastAPI(title="AI Council API", version="1.0.0", lifespan=lifespan)
 
 # Load environment variables
@@ -249,7 +249,7 @@ async def get_status(ai_council: AICouncil = Depends(get_ai_council)):
 @app.post("/api/process")
 @limiter.limit("100/15minutes")
 async def process_request(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
-    del request  # used by limiter decorator
+    del request
     try:
         mode = normalize_mode(req.mode)
         response = await maybe_await(ai_council.process_request(req.query, mode))
