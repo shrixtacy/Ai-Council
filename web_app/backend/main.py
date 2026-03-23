@@ -89,18 +89,21 @@ class TaskManager:
                 )
 
 
-@asynccontextmanager
-async def track_in_flight_task(request: Request):
-    """Context manager to track a request as an in-flight task."""
-    task = asyncio.current_task()
-    task_manager: TaskManager = request.app.state.task_manager
-    if task:
-        task_manager.add(task)
-    try:
-        yield
-    finally:
-        if task:
-            task_manager.remove(task)
+class TaskTrackingMiddleware(BaseHTTPMiddleware):
+    """Middleware to track all HTTP requests instantly to prevent shutdown race conditions."""
+    async def dispatch(self, request: Request, call_next):
+        task = asyncio.current_task()
+        # Ensure task manager is initialized on the app state before tracking
+        task_manager = getattr(request.app.state, "task_manager", None)
+        
+        if task and task_manager:
+            task_manager.add(task)
+            
+        try:
+            return await call_next(request)
+        finally:
+            if task and task_manager:
+                task_manager.remove(task)
 
 
 def check_shutdown_status(request: Request):
@@ -147,7 +150,6 @@ async def lifespan(app: FastAPI):
         app.state.is_shutting_down.set()
         
         # 2. Wait for in-flight tasks to finish (15-second timeout)
-        # CodeRabbit Fix: Wait for tasks BEFORE closing websockets, so clients get their answers
         print("[INFO] Waiting for in-flight tasks to complete...")
         await app.state.task_manager.wait_for_completion(timeout=15.0)
         
@@ -168,7 +170,7 @@ async def lifespan(app: FastAPI):
                         else:
                             method()
                         print(f"[OK] Successfully executed AI Council `{method_name}`")
-                        break  
+                        # CodeRabbit Fix: Removed 'break' so all cleanup hooks execute cumulatively
                     except Exception as e:
                         print(f"[ERROR] Failed during AI Council `{method_name}`: {e}")
 
@@ -199,6 +201,8 @@ elif env == "development":
 else:
     allowed_origins = []
 
+# CodeRabbit Fix: Added middleware so requests are tracked instantly
+app.add_middleware(TaskTrackingMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(RateLimitHeaderMiddleware)
 app.add_middleware(
@@ -318,33 +322,33 @@ async def get_status(ai_council: AICouncil = Depends(get_ai_council)):
 @app.post("/api/process", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def process_request(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
-    async with track_in_flight_task(request):
-        try:
-            mode = normalize_mode(req.mode)
-            response = await maybe_await(ai_council.process_request(req.query, mode))
-            return serialize_response(response)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    # CodeRabbit Fix: track_in_flight_task removed; handled safely by TaskTrackingMiddleware
+    try:
+        mode = normalize_mode(req.mode)
+        response = await maybe_await(ai_council.process_request(req.query, mode))
+        return serialize_response(response)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/estimate", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def estimate_cost(request: Request, req: EstimateModel, ai_council: AICouncil = Depends(get_ai_council)):
-    async with track_in_flight_task(request):
-        try:
-            mode = normalize_mode(req.mode)
-            return ai_council.estimate_cost(req.query, mode)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    # CodeRabbit Fix: track_in_flight_task removed; handled safely by TaskTrackingMiddleware
+    try:
+        mode = normalize_mode(req.mode)
+        return ai_council.estimate_cost(req.query, mode)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/analyze", dependencies=[Depends(check_shutdown_status)])
 async def analyze_tradeoffs(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
-    async with track_in_flight_task(request):
-        try:
-            return await maybe_await(ai_council.analyze_tradeoffs(req.query))
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    # CodeRabbit Fix: track_in_flight_task removed; handled safely by TaskTrackingMiddleware
+    try:
+        return await maybe_await(ai_council.analyze_tradeoffs(req.query))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
@@ -422,7 +426,6 @@ class WebSocketManager:
         """Cleanly notifies and closes all active websocket connections during shutdown."""
         sockets = list(self.active_sockets)
         
-        # CodeRabbit Fix: Added per-socket timeouts run concurrently to prevent stalls
         async def _close_socket(ws: WebSocket):
             try:
                 await asyncio.wait_for(
@@ -479,7 +482,6 @@ async def websocket_endpoint(websocket: WebSocket):
             except asyncio.TimeoutError:
                 continue 
 
-            # CodeRabbit Fix: Re-check immediately after yielding control to receive_text
             if websocket.app.state.is_shutting_down.is_set():
                 try:
                     await websocket.close(code=1013, reason="Server is shutting down")
