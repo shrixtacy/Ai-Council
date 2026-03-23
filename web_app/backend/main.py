@@ -93,7 +93,6 @@ class TaskTrackingMiddleware(BaseHTTPMiddleware):
     """Middleware to track all HTTP requests instantly to prevent shutdown race conditions."""
     async def dispatch(self, request: Request, call_next):
         task = asyncio.current_task()
-        # Ensure task manager is initialized on the app state before tracking
         task_manager = getattr(request.app.state, "task_manager", None)
         
         if task and task_manager:
@@ -115,7 +114,6 @@ def check_shutdown_status(request: Request):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize resources on startup and clean up on shutdown."""
-    # --- STARTUP PHASE ---
     app.state.is_shutting_down = asyncio.Event()
     app.state.task_manager = TaskManager()
     
@@ -143,21 +141,16 @@ async def lifespan(app: FastAPI):
         print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
 
-    # --- SHUTDOWN PHASE ---
     finally:
         print("\n[INFO] Initiating graceful shutdown sequence...")
-        # 1. Stop accepting new requests
         app.state.is_shutting_down.set()
         
-        # 2. Wait for in-flight tasks to finish (15-second timeout)
         print("[INFO] Waiting for in-flight tasks to complete...")
         await app.state.task_manager.wait_for_completion(timeout=15.0)
         
-        # 3. Notify and close active WebSockets
         print("[INFO] Closing active WebSocket connections...")
         await ws_manager.close_all()
         
-        # 4. Flush/Cleanup AI Council resources
         print("[INFO] Cleaning up persistent layers and caching...")
         ai_council = getattr(app.state, "ai_council", None)
         if ai_council:
@@ -170,7 +163,6 @@ async def lifespan(app: FastAPI):
                         else:
                             method()
                         print(f"[OK] Successfully executed AI Council `{method_name}`")
-                        # CodeRabbit Fix: Removed 'break' so all cleanup hooks execute cumulatively
                     except Exception as e:
                         print(f"[ERROR] Failed during AI Council `{method_name}`: {e}")
 
@@ -201,7 +193,6 @@ elif env == "development":
 else:
     allowed_origins = []
 
-# CodeRabbit Fix: Added middleware so requests are tracked instantly
 app.add_middleware(TaskTrackingMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(RateLimitHeaderMiddleware)
@@ -322,7 +313,6 @@ async def get_status(ai_council: AICouncil = Depends(get_ai_council)):
 @app.post("/api/process", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def process_request(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
-    # CodeRabbit Fix: track_in_flight_task removed; handled safely by TaskTrackingMiddleware
     try:
         mode = normalize_mode(req.mode)
         response = await maybe_await(ai_council.process_request(req.query, mode))
@@ -334,7 +324,6 @@ async def process_request(request: Request, req: RequestModel, ai_council: AICou
 @app.post("/api/estimate", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def estimate_cost(request: Request, req: EstimateModel, ai_council: AICouncil = Depends(get_ai_council)):
-    # CodeRabbit Fix: track_in_flight_task removed; handled safely by TaskTrackingMiddleware
     try:
         mode = normalize_mode(req.mode)
         return ai_council.estimate_cost(req.query, mode)
@@ -344,7 +333,6 @@ async def estimate_cost(request: Request, req: EstimateModel, ai_council: AICoun
 
 @app.post("/api/analyze", dependencies=[Depends(check_shutdown_status)])
 async def analyze_tradeoffs(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
-    # CodeRabbit Fix: track_in_flight_task removed; handled safely by TaskTrackingMiddleware
     try:
         return await maybe_await(ai_council.analyze_tradeoffs(req.query))
     except Exception as exc:
@@ -494,7 +482,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.close(code=1008, reason="Rate limit exceeded")
                 break
                 
-            request_data = json.loads(data)
+            # CodeRabbit Fix 1: Handle malformed JSON from client safely
+            try:
+                request_data = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON format"})
+                continue
 
             query = request_data.get("query", "")
             mode = request_data.get("mode", "balanced")
@@ -508,7 +501,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 response = await task
                 await websocket.send_json({"type": "result", **serialize_response(response)})
             except asyncio.CancelledError:
-                await websocket.send_json({"type": "error", "message": "Request cancelled due to server shutdown."})
+                # CodeRabbit Fix 2: Wrap send in try/except during cancellation
+                try:
+                    await websocket.send_json({"type": "error", "message": "Request cancelled due to server shutdown."})
+                except Exception:
+                    pass
                 break
             except Exception as e:
                 logging.error(f"Error processing WS request: {e}")
@@ -532,4 +529,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # CodeRabbit Fix 3: Read host/port from environment for safer deployments
+    host = os.getenv("APP_HOST", "127.0.0.1")
+    port = int(os.getenv("APP_PORT", "8000"))
+    uvicorn.run(app, host=host, port=port)
