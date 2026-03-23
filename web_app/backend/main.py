@@ -70,9 +70,23 @@ class TaskManager:
             return
         
         logging.info(f"Waiting for {len(self.active_tasks)} in-flight tasks to complete...")
-        _done, pending = await asyncio.wait(self.active_tasks, timeout=timeout)
+        deadline = time.time() + timeout
         
-        if pending:
+        # CodeRabbit Fix: Loop to continuously re-evaluate the task set for late-arrivers
+        while self.active_tasks:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            
+            # Use FIRST_COMPLETED and a short timeout to wake up and catch newly added tasks
+            await asyncio.wait(
+                self.active_tasks, 
+                timeout=min(1.0, remaining), 
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+        if self.active_tasks:
+            pending = list(self.active_tasks)
             logging.warning(f"{len(pending)} tasks did not complete in time. Cancelling them...")
             for task in pending:
                 task.cancel()
@@ -153,18 +167,16 @@ async def lifespan(app: FastAPI):
         
         print("[INFO] Cleaning up persistent layers and caching...")
         ai_council = getattr(app.state, "ai_council", None)
-        if ai_council:
-            for method_name in ["shutdown", "close", "cleanup", "flush"]:
-                if hasattr(ai_council, method_name):
-                    method = getattr(ai_council, method_name)
-                    try:
-                        if inspect.iscoroutinefunction(method):
-                            await method()
-                        else:
-                            method()
-                        print(f"[OK] Successfully executed AI Council `{method_name}`")
-                    except Exception as e:
-                        print(f"[ERROR] Failed during AI Council `{method_name}`: {e}")
+        # CodeRabbit Fix: Explicitly delegate teardown sequencing to AICouncil.shutdown()
+        if ai_council and hasattr(ai_council, "shutdown"):
+            try:
+                if inspect.iscoroutinefunction(ai_council.shutdown):
+                    await ai_council.shutdown()
+                else:
+                    ai_council.shutdown()
+                print("[OK] Successfully executed AI Council `shutdown`")
+            except Exception as e:
+                print(f"[ERROR] Failed during AI Council `shutdown`: {e}")
 
         print("[OK] Graceful shutdown complete.")
 
@@ -482,7 +494,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.close(code=1008, reason="Rate limit exceeded")
                 break
                 
-            # CodeRabbit Fix 1: Handle malformed JSON from client safely
             try:
                 request_data = json.loads(data)
             except json.JSONDecodeError:
@@ -494,6 +505,15 @@ async def websocket_endpoint(websocket: WebSocket):
 
             await websocket.send_json({"type": "status", "message": "Processing your request..."})
 
+            # CodeRabbit Fix: Final check immediately before spawning background job
+            if websocket.app.state.is_shutting_down.is_set():
+                try:
+                    await websocket.send_json({"type": "error", "message": "Server is shutting down. Request aborted."})
+                    await websocket.close(code=1013, reason="Server is shutting down")
+                except Exception:
+                    pass
+                break
+
             task = asyncio.create_task(maybe_await(ai_council.process_request(query, normalize_mode(mode))))
             websocket.app.state.task_manager.add(task)
             
@@ -501,7 +521,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 response = await task
                 await websocket.send_json({"type": "result", **serialize_response(response)})
             except asyncio.CancelledError:
-                # CodeRabbit Fix 2: Wrap send in try/except during cancellation
                 try:
                     await websocket.send_json({"type": "error", "message": "Request cancelled due to server shutdown."})
                 except Exception:
@@ -529,7 +548,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    # CodeRabbit Fix 3: Read host/port from environment for safer deployments
     host = os.getenv("APP_HOST", "127.0.0.1")
     port = int(os.getenv("APP_PORT", "8000"))
     uvicorn.run(app, host=host, port=port)
