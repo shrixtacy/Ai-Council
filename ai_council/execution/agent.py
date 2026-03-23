@@ -1,12 +1,13 @@
 """Execution agent implementation for AI Council."""
 
 import time
+import re
 from ai_council.core.logger import get_logger
 import asyncio
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
-from ..core.interfaces import ExecutionAgent, AIModel, ModelError, FailureResponse
+from ..core.interfaces import ExecutionAgent, AIModel, ModelError, FailureResponse, ModelRegistry
 from ..core.models import Subtask, AgentResponse, SelfAssessment, RiskLevel
 from ..core.failure_handling import (
     FailureEvent, FailureType, resilience_manager, create_failure_event
@@ -23,20 +24,23 @@ logger = get_logger(__name__)
 class BaseExecutionAgent(ExecutionAgent):
     """Base implementation of ExecutionAgent with comprehensive failure handling."""
     
-    def __init__(self, max_retries: int = 3, retry_delay: float = 1.0):
+    def __init__(self, model_registry: Optional[ModelRegistry] = None, max_retries: int = 3, retry_delay: float = 1.0):
         """Initialize the execution agent.
         
         Args:
+            model_registry: Registry for resolving AI models
             max_retries: Maximum number of retry attempts for failed executions
             retry_delay: Base delay in seconds between retry attempts
         """
+        self.model_registry = model_registry
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self._execution_history: Dict[str, Any] = {}
         
         # Initialize circuit breakers for different failure types
         from ..core.failure_handling import CircuitBreakerConfig
-        
+
+
         # Circuit breaker for model API calls
         api_cb_config = CircuitBreakerConfig(
             failure_threshold=5,
@@ -51,13 +55,18 @@ class BaseExecutionAgent(ExecutionAgent):
         rate_limit_manager.set_rate_limit("openai", 60)  # 60 requests per minute
         rate_limit_manager.set_rate_limit("anthropic", 50)  # 50 requests per minute
         rate_limit_manager.set_rate_limit("default", 30)  # Default rate limit
+
+    def _count_tokens(self, text: str) -> int:
+        """Estimate tokens using simple logic (for tests)."""
+        return max(1, len(text) // 4)
     
-    async def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
+    async def execute(self, subtask: Subtask, model: AIModel, depth: int = 0) -> AgentResponse:
         """Execute a subtask using the specified AI model with comprehensive failure handling.
         
         Args:
             subtask: The subtask to execute
             model: The AI model to use for execution
+            depth: Current fallback depth
             
         Returns:
             AgentResponse: The response including content and self-assessment
@@ -91,7 +100,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 self._execution_history[execution_key]["attempts"] = attempt + 1
                 
                 # Apply rate limiting
-                provider = self._get_model_provider(model_id)
+                provider = self._get_model_provider(model)
                 while True:
                     allowed, wait_time = rate_limit_manager.check_rate_limit(provider)
                     if not allowed:
@@ -104,7 +113,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 response_content = await self._execute_with_protection(subtask, model)
                 
                 # Generate self-assessment
-                self_assessment = self.generate_self_assessment(response_content, subtask)
+                self_assessment = await self.generate_self_assessment(response_content, subtask, model_id)
                 self_assessment.model_used = model_id
                 self_assessment.execution_time = time.time() - start_time
                 
@@ -118,7 +127,7 @@ class BaseExecutionAgent(ExecutionAgent):
                     model_used=model_id,
                     content=response_content,
                     self_assessment=self_assessment,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     success=True,
                     metadata={
                         "attempts": attempt + 1,
@@ -147,10 +156,48 @@ class BaseExecutionAgent(ExecutionAgent):
                 
                 # Handle recovery action
                 if not recovery_action.should_retry or attempt >= self.max_retries:
-                    if recovery_action.fallback_model:
-                        # Try fallback model
-                        return await self._execute_with_fallback(
-                            subtask, recovery_action.fallback_model, start_time
+                    fallback_models = []
+                    if recovery_action.metadata and "fallback_models" in recovery_action.metadata:
+                        fallback_models = recovery_action.metadata["fallback_models"]
+                    elif recovery_action.fallback_model:
+                        fallback_models = [recovery_action.fallback_model]
+                        
+                    if fallback_models:
+                        logger.info("Iterating over fallback chain", extra={
+                            "subtask_id": subtask.id, 
+                            "original_model": model_id,
+                            "fallback_chain": fallback_models
+                        })
+                        fallback_errors = []
+                        for fallback_model_id in fallback_models:
+                            # Try fallback model
+                            response = await self._execute_with_fallback(
+                                subtask, fallback_model_id, start_time, depth
+                            )
+                            if response.success:
+                                # Log transition
+                                logger.info("Fallback execution successful", extra={
+                                    "subtask_id": subtask.id,
+                                    "original_model": model_id,
+                                    "successful_fallback": fallback_model_id
+                                })
+                                # Attach fallback metadata
+                                if response.metadata is None:
+                                    response.metadata = {}
+                                response.metadata["fallback_attempts"] = response.metadata.get("fallback_attempts", 0) + 1
+                                response.metadata["fallback_failures"] = fallback_errors
+                                return response
+                            
+                            # Collect error and try the next one
+                            fallback_errors.append({
+                                "model_id": fallback_model_id,
+                                "error": response.error_message
+                            })
+                            logger.warning(f"Fallback model {fallback_model_id} failed: {response.error_message}")
+                            
+                        # If all fallbacks failed
+                        return self._create_failure_response(
+                            subtask, model_id, f"All fallback models failed. Last error: {fallback_errors[-1]['error'] if fallback_errors else str(last_error)}", start_time
                         )
                     elif recovery_action.skip_subtask:
                         # Skip this subtask
@@ -225,6 +272,12 @@ class BaseExecutionAgent(ExecutionAgent):
         elif "quota" in error_type_name.lower() or "exceeded" in str(error).lower():
             failure_type = FailureType.QUOTA_EXCEEDED
             severity = RiskLevel.MEDIUM
+        elif "content" in error_type_name.lower() or "filter" in str(error).lower():
+            failure_type = FailureType.VALIDATION_ERROR
+            severity = RiskLevel.MEDIUM
+        elif "provider" in error_type_name.lower() or "providererror" in error_type_name.lower():
+            failure_type = FailureType.API_FAILURE
+            severity = RiskLevel.HIGH
         else:
             failure_type = FailureType.API_FAILURE
             severity = RiskLevel.MEDIUM
@@ -248,41 +301,61 @@ class BaseExecutionAgent(ExecutionAgent):
         self, 
         subtask: Subtask, 
         fallback_model_id: str, 
-        original_start_time: float
+        original_start_time: float,
+        depth: int = 0
     ) -> AgentResponse:
         """Execute subtask with fallback model."""
-        logger.info("Attempting fallback execution with model", extra={"fallback_model_id": fallback_model_id})
+        MAX_FALLBACK_DEPTH = 3
         
-        # TODO: Implement real fallback execution (#113)
-        # We need to resolve the fallback model instance from the ModelRegistry
-        # and dynamically invoke the normal execution path (e.g., self.execute),
-        # instead of returning a hard-coded degraded AgentResponse with 
-        # a default SelfAssessment and RiskLevel.
+        if depth >= MAX_FALLBACK_DEPTH:
+            logger.error(
+                "Maximum fallback depth reached", 
+                extra={"subtask_id": subtask.id, "depth": depth}
+            )
+            return self._create_failure_response(
+                subtask, fallback_model_id, f"Maximum fallback depth of {MAX_FALLBACK_DEPTH} reached", original_start_time
+            )
 
-        # This is a simplified implementation - in practice, you'd need to
-        # get the actual fallback model instance from a registry
-        # For now, return a degraded response
-        execution_time = time.time() - original_start_time
-        
-        return AgentResponse(
-            subtask_id=subtask.id,
-            model_used=fallback_model_id,
-            content="Fallback execution - limited functionality available",
-            self_assessment=SelfAssessment(
-                confidence_score=0.3,
-                risk_level=RiskLevel.HIGH,
-                model_used=fallback_model_id,
-                execution_time=execution_time,
-                assumptions=["Using fallback model with reduced capabilities"]
-            ),
-            timestamp=datetime.utcnow(),
-            success=True,
-            metadata={
-                "fallback_execution": True,
-                "original_failure": True,
-                "degraded_mode": True
+        logger.info(
+            f"Attempting fallback execution (depth {depth + 1})", 
+            extra={
+                "subtask_id": subtask.id,
+                "fallback_model_id": fallback_model_id,
+                "depth": depth + 1
             }
         )
+        
+        if not self.model_registry:
+            logger.error("Model registry not available for fallback resolution")
+            return self._create_failure_response(
+                subtask, fallback_model_id, "Model registry not available", original_start_time
+            )
+
+        fallback_model = self.model_registry.get_model_by_id(fallback_model_id)
+        if not fallback_model:
+            logger.error("Fallback model not found in registry", extra={"model_id": fallback_model_id})
+            return self._create_failure_response(
+                subtask, fallback_model_id, f"Fallback model {fallback_model_id} not found in registry", original_start_time
+            )
+
+        # Recursively call execute with the fallback model
+        response = await self.execute(subtask, fallback_model, depth=depth + 1)
+        
+        # Update metadata to track fallback chain
+        if response.metadata is None:
+            response.metadata = {}
+        
+        # Only set if not already present (deepest call sets it first)
+        if "fallback_depth" not in response.metadata:
+            response.metadata["fallback_depth"] = depth + 1
+        
+        if "is_fallback" not in response.metadata:
+            response.metadata["is_fallback"] = True
+            
+        if "original_start_time" not in response.metadata:
+            response.metadata["original_start_time"] = original_start_time
+
+        return response
     
     def _create_skip_response(
         self, 
@@ -304,7 +377,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 execution_time=execution_time,
                 assumptions=["Subtask skipped due to system overload"]
             ),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             success=False,
             error_message="Subtask skipped due to load shedding",
             metadata={
@@ -333,7 +406,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 model_used=model_id,
                 execution_time=execution_time
             ),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             success=False,
             error_message=f"Failed after {self.max_retries + 1} attempts: {error_message}",
             metadata={
@@ -343,25 +416,36 @@ class BaseExecutionAgent(ExecutionAgent):
             }
         )
     
-    def _get_model_provider(self, model_id: str) -> str:
-        """Get provider name from model ID for rate limiting."""
-        model_id_lower = model_id.lower()
+    def _get_model_provider(self, model: AIModel) -> str:
+        """Get provider name from model metadata for rate limiting.
         
-        if "gpt" in model_id_lower or "openai" in model_id_lower:
-            return "openai"
-        elif "claude" in model_id_lower or "anthropic" in model_id_lower:
-            return "anthropic"
-        elif "gemini" in model_id_lower or "google" in model_id_lower:
-            return "google"
-        else:
-            return "default"
+        Args:
+            model: The AI model instance
+            
+        Returns:
+            str: The provider name in lowercase, or "default"
+        """
+        # Safely extract the provider from the model's metadata
+        if hasattr(model, 'metadata') and isinstance(model.metadata, dict):
+            provider = model.metadata.get("provider")
+            if provider:
+                normalized = str(provider).strip().lower()
+                
+                # Verify the provider is actually configured in the rate limiter
+                configured_limits = getattr(rate_limit_manager, "rate_limits", {})
+                if normalized and normalized in configured_limits:
+                    return normalized
+                    
+        # Fallback if metadata is missing, provider is not specified, or unconfigured
+        return "default"
     
-    def generate_self_assessment(self, response: str, subtask: Subtask) -> SelfAssessment:
+    async def generate_self_assessment(self, response: str, subtask: Subtask, model_id: str) -> SelfAssessment:
         """Generate a self-assessment of the agent's performance.
         
         Args:
             response: The generated response content
             subtask: The subtask that was executed
+            model_id: Identifier of the LLM model used, required for cost estimation
             
         Returns:
             SelfAssessment: Structured self-assessment metadata
@@ -375,11 +459,12 @@ class BaseExecutionAgent(ExecutionAgent):
         # Extract assumptions from the response
         assumptions = self._extract_assumptions(response, subtask)
         
-        # Estimate cost (simplified - would integrate with actual model pricing)
-        estimated_cost = self._estimate_cost(response, subtask)
+        # Estimate token usage (split into input and output)
+        token_usage_dict = self._estimate_token_usage(response, subtask)
+        token_usage = token_usage_dict["total"]
         
-        # Estimate token usage (simplified approximation)
-        token_usage = self._estimate_token_usage(response, subtask)
+        # Estimate cost based on model-specific pricing
+        estimated_cost = self._estimate_cost(response, subtask, model_id)
         
         return SelfAssessment(
             confidence_score=confidence_score,
@@ -389,7 +474,7 @@ class BaseExecutionAgent(ExecutionAgent):
             token_usage=token_usage,
             execution_time=0.0,  # Will be set by execute method
             model_used="",  # Will be set by execute method
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
     
     def handle_model_failure(self, error: ModelError) -> FailureResponse:
@@ -563,24 +648,29 @@ class BaseExecutionAgent(ExecutionAgent):
             confidence += 0.2
         elif response_length < 10:
             confidence -= 0.3
+            
+        response_lower = response.lower()
         
-        # Check for uncertainty indicators
-        uncertainty_phrases = [
-            "i'm not sure", "i think", "maybe", "possibly", "might be",
-            "i don't know", "unclear", "uncertain", "not confident"
+        # Use regex word boundaries and strictly self-referential phrases
+        uncertainty_patterns = [
+            r"\bi'm not sure\b", r"\bi am not sure\b", 
+            r"\bi think\s+(?:but|though|however|but i'm not sure|though i'm not sure)\b", 
+            r"\bi don't know\b", r"\bi do not know\b",
+            r"\bit is unclear to me\b", r"\bi am uncertain\b", r"\bi'm uncertain\b",
+            r"\bi am not confident\b", r"\bi'm not confident\b"
         ]
         
-        response_lower = response.lower()
-        uncertainty_count = sum(1 for phrase in uncertainty_phrases if phrase in response_lower)
+        uncertainty_count = sum(len(re.findall(pattern, response_lower)) for pattern in uncertainty_patterns)
         confidence -= min(0.3, uncertainty_count * 0.1)
         
-        # Check for confidence indicators
-        confidence_phrases = [
-            "definitely", "certainly", "clearly", "obviously", "without doubt",
-            "confirmed", "verified", "established"
+        # Apply word boundaries to confidence indicators
+        confidence_patterns = [
+            r"\bdefinitely\b", r"\bcertainly\b", r"\bclearly\b", r"\bobviously\b", 
+            r"\bwithout doubt\b", r"\bwithout a doubt\b", r"\bconfirmed\b", 
+            r"\bverified\b", r"\bestablished\b"
         ]
         
-        confidence_count = sum(1 for phrase in confidence_phrases if phrase in response_lower)
+        confidence_count = sum(len(re.findall(pattern, response_lower)) for pattern in confidence_patterns)
         confidence += min(0.2, confidence_count * 0.05)
         
         # Ensure confidence is within bounds
@@ -628,22 +718,23 @@ class BaseExecutionAgent(ExecutionAgent):
         """
         assumptions = []
         
-        # Look for assumption indicators
+        # Use regex word boundaries to prevent partial matches
         assumption_patterns = [
-            "assuming", "given that", "if we assume", "presuming",
-            "taking for granted", "based on the assumption"
+            r"\bassuming\b", r"\bgiven that\b", r"\bif we assume\b", 
+            r"\bpresuming\b", r"\btaking for granted\b", r"\bbased on the assumption\b"
         ]
         
-        response_lower = response.lower()
-        sentences = response.split('.')
+        # Split by punctuation or newlines, but use negative lookbehinds to protect 
+        split_pattern = r'(?<!\d)(?<!\bDr)(?<!\bMr)(?<!\bMs)(?<!\bvs)(?<!\be\.g)(?<!\bi\.e)(?<!\bMrs)(?<!\betc)[.!?]+(?:\s+|\n+)|\n+'
+        sentences = re.split(split_pattern, response)
         
         for sentence in sentences:
             sentence_lower = sentence.lower().strip()
             for pattern in assumption_patterns:
-                if pattern in sentence_lower:
+                if re.search(pattern, sentence_lower):
                     # Clean up the assumption text
                     assumption = sentence.strip()
-                    if assumption and len(assumption) > 10:
+                    if assumption and len(assumption) > 15:
                         assumptions.append(assumption)
                     break
         
@@ -675,24 +766,37 @@ class BaseExecutionAgent(ExecutionAgent):
         
         return defaults.get(task_type, [])
     
-    def _estimate_cost(self, response: str, subtask: Subtask) -> float:
-        """Estimate the cost of generating the response.
+    def _estimate_cost(self, response: str, subtask: Subtask, model_id: str) -> float:
+        """Estimate the cost of generating the response based on model pricing.
         
         Args:
             response: The generated response
             subtask: The subtask that was executed
+            model_id: The ID of the model used
             
         Returns:
             float: Estimated cost in USD
         """
-        # Simplified cost estimation - would integrate with actual model pricing
-        # Assume average cost per token
-        estimated_tokens = self._estimate_token_usage(response, subtask)
-        cost_per_token = 0.00002  # Example: $0.00002 per token
+        token_usage = self._estimate_token_usage(response, subtask)
         
-        return estimated_tokens * cost_per_token
+        # Use model registry to get accurate pricing
+        if self.model_registry:
+            try:
+                cost_profile = self.model_registry.get_model_cost_profile(model_id)
+                input_cost = token_usage["input"] * cost_profile.cost_per_input_token
+                output_cost = token_usage["output"] * cost_profile.cost_per_output_token
+                
+                total_cost = input_cost + output_cost
+                return max(cost_profile.minimum_cost, total_cost)
+            except (KeyError, AttributeError):
+                # Fallback to a default if model not found or registry fails
+                pass
+        
+        # Fallback to default pricing if registry is unavailable or model not found
+        cost_per_token = 0.00002
+        return token_usage["total"] * cost_per_token
     
-    def _estimate_token_usage(self, response: str, subtask: Subtask) -> int:
+    def _estimate_token_usage(self, response: str, subtask: Subtask) -> Dict[str, int]:
         """Estimate token usage for the request and response.
         
         Args:
@@ -700,13 +804,15 @@ class BaseExecutionAgent(ExecutionAgent):
             subtask: The subtask that was executed
             
         Returns:
-            int: Estimated token count
+            Dict[str, int]: Estimated token counts for input and output
         """
-        # Rough approximation: 1 token ≈ 4 characters for English text
-        prompt_chars = len(self._build_prompt(subtask))
-        response_chars = len(response)
+
+        prompt_text = self._build_prompt(subtask)
+        input_tokens = max(1, self._count_tokens(prompt_text))
+        output_tokens = max(1, self._count_tokens(response))
         
-        total_chars = prompt_chars + response_chars
-        estimated_tokens = total_chars // 4
-        
-        return max(1, estimated_tokens)  # Minimum 1 token
+        return {
+            "input": input_tokens,
+            "output": output_tokens,
+            "total": input_tokens + output_tokens
+        }

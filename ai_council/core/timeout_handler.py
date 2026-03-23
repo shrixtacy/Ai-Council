@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Optional, TypeVar, Union
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
-from .failure_handling import FailureEvent, FailureType, RiskLevel, resilience_manager
+from .failure_handling import FailureEvent, FailureType, RiskLevel, ResilienceManager, resilience_manager
 
 
 logger = get_logger(__name__)
@@ -28,12 +28,19 @@ class TimeoutError(Exception):
 
 
 class TimeoutHandler:
-    """Handles various types of timeouts in the system."""
+    """Handles various types of timeouts in the system.
     
-    def __init__(self):
+    Args:
+        resilience_manager: Optional ResilienceManager instance for recording failures.
+            Falls back to the module-level global for backward compatibility (Issue #158).
+    """
+    
+    def __init__(self, resilience_manager: Optional['ResilienceManager'] = None):
         self.active_operations: dict[str, float] = {}
         self.timeout_counts: dict[str, int] = {}
         self._lock = threading.Lock()
+        # Accept injected manager or fall back to module-level global (backward compat.)
+        self._resilience_manager = resilience_manager
     
     def with_timeout(
         self,
@@ -183,7 +190,9 @@ class TimeoutHandler:
             }
         )
         
-        resilience_manager.handle_failure(failure_event)
+        # Use injected manager when available, else fall back to the module-level global.
+        mgr = self._resilience_manager if self._resilience_manager is not None else resilience_manager
+        mgr.handle_failure(failure_event)
         
         logger.warning(
             f"Timeout in {component}:{operation_name} after {timeout_duration}s "
@@ -351,10 +360,12 @@ class RateLimitManager:
             time.sleep(wait_time)
     """
     
-    def __init__(self):
+    def __init__(self, resilience_manager: Optional['ResilienceManager'] = None):
         self.rate_limits: dict[str, dict[str, Any]] = {}
         self.request_history: dict[str, list[float]] = {}
         self._lock = threading.Lock()
+        # Accept injected manager or fall back to module-level global (backward compat.)
+        self._resilience_manager = resilience_manager
     
     def set_rate_limit(
         self,
@@ -444,7 +455,9 @@ class RateLimitManager:
             }
         )
         
-        resilience_manager.handle_failure(failure_event)
+        # Use injected manager when available, else fall back to the module-level global.
+        mgr = self._resilience_manager if self._resilience_manager is not None else resilience_manager
+        mgr.handle_failure(failure_event)
     
     def get_rate_limit_status(self, resource: str) -> dict[str, Any]:
         """Get current rate limit status for a resource.
@@ -476,73 +489,97 @@ class RateLimitManager:
             }
 
 
-# Global instances
+# Module-level global instances — backward-compatible defaults.
+# Prefer obtaining these via AICouncilFactory for testability and multi-tenancy (Issue #158).
+# These globals will be deprecated in a future release.
 timeout_handler = TimeoutHandler()
 adaptive_timeout_manager = AdaptiveTimeoutManager()
 rate_limit_manager = RateLimitManager()
 
 
-def with_adaptive_timeout(operation: str, component: str = ""):
-    """Decorator for adaptive timeout based on historical performance."""
+def with_adaptive_timeout(
+    operation: str,
+    component: str = "",
+    _timeout_handler: Optional[TimeoutHandler] = None,
+    _adaptive_timeout_manager: Optional[AdaptiveTimeoutManager] = None,
+):
+    """Decorator for adaptive timeout based on historical performance.
+    
+    Args:
+        operation: The name of the operation (used for timeout tracking).
+        component: The component name (used for failure recording).
+        _timeout_handler: Optional injected TimeoutHandler. Falls back to the
+            module-level global for backward compatibility (Issue #158).
+        _adaptive_timeout_manager: Optional injected AdaptiveTimeoutManager.
+            Falls back to the module-level global for backward compatibility.
+    """
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        # Resolve managers at decoration time for efficiency.
+        th = _timeout_handler if _timeout_handler is not None else timeout_handler
+        atm = _adaptive_timeout_manager if _adaptive_timeout_manager is not None else adaptive_timeout_manager
+
         if asyncio.iscoroutinefunction(func):
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs) -> T:
-                timeout_seconds = adaptive_timeout_manager.get_adaptive_timeout(operation)
+                timeout_seconds = atm.get_adaptive_timeout(operation)
                 start_time = time.time()
                 try:
-                    result = await timeout_handler.execute_with_timeout(
+                    result = await th.execute_with_timeout(
                         func, timeout_seconds, operation, component,
                         None, None, *args, **kwargs
                     )
                     execution_time = time.time() - start_time
-                    adaptive_timeout_manager.record_execution_time(operation, execution_time)
+                    atm.record_execution_time(operation, execution_time)
                     return result
                 except TimeoutError:
-                    adaptive_timeout_manager.record_execution_time(operation, timeout_seconds)
+                    atm.record_execution_time(operation, timeout_seconds)
                     raise
             return async_wrapper
         else:
             @functools.wraps(func)
             def sync_wrapper(*args, **kwargs) -> T:
-                # Get adaptive timeout
-                timeout_seconds = adaptive_timeout_manager.get_adaptive_timeout(operation)
-                
+                timeout_seconds = atm.get_adaptive_timeout(operation)
                 start_time = time.time()
                 try:
-                    result = timeout_handler.execute_with_timeout(
+                    result = th.execute_with_timeout(
                         func, timeout_seconds, operation, component,
                         None, None, *args, **kwargs
                     )
-                    
-                    # Record successful execution time
                     execution_time = time.time() - start_time
-                    adaptive_timeout_manager.record_execution_time(operation, execution_time)
-                    
+                    atm.record_execution_time(operation, execution_time)
                     return result
-                    
                 except TimeoutError:
-                    # Record timeout (use timeout duration as execution time)
-                    adaptive_timeout_manager.record_execution_time(operation, timeout_seconds)
+                    atm.record_execution_time(operation, timeout_seconds)
                     raise
-            
+
             return sync_wrapper
     return decorator
 
 
-def with_rate_limit(resource: str, component: str = ""):
-    """Decorator for rate limit checking."""
+def with_rate_limit(
+    resource: str,
+    component: str = "",
+    _rate_limit_manager: Optional[RateLimitManager] = None,
+):
+    """Decorator for rate limit checking.
+    
+    Args:
+        resource: The resource identifier to rate-limit.
+        component: The component name.
+        _rate_limit_manager: Optional injected RateLimitManager. Falls back to the
+            module-level global for backward compatibility (Issue #158).
+    """
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        # Resolve manager at decoration time.
+        rlm = _rate_limit_manager if _rate_limit_manager is not None else rate_limit_manager
+
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> T:
-            # Check rate limit
-            allowed, wait_time = rate_limit_manager.check_rate_limit(resource)
-            
+            allowed, wait_time = rlm.check_rate_limit(resource)
             if not allowed:
                 logger.warning("Rate limit exceeded", extra={"resource": resource, "wait_time": wait_time})
                 time.sleep(wait_time)
-            
             return func(*args, **kwargs)
-        
+
         return wrapper
     return decorator

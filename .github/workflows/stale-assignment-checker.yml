@@ -86,41 +86,8 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: issue.number,
-                  body: `👋 **Gentle Reminder**\n\nHey @${assignee}! This issue was assigned to you 24 hours ago.\n\n⏰ **Timeline:**\n- ✅ 24 hours: Reminder (now)\n- ⚠️ 48 hours: Auto-unassignment if no PR\n\n📋 **What to do:**\n- Create a PR and link it to this issue (mention #${issue.number} in PR description)\n- If you need more time, comment here to let us know\n- If you can't work on this, let us know so we can reassign\n\n💡 **Tip:** Even a draft PR shows progress and prevents auto-unassignment!\n\nThanks for contributing! 🚀`
+                  body: `👋 **Gentle Reminder**\n\nHey @${assignee}! This issue was assigned to you 24 hours ago.\n\n⏰ **Timeline:**\n- ✅ 24 hours: Reminder (now)\n\n📋 **What to do:**\n- Create a PR and link it to this issue (mention #${issue.number} in PR description)\n- If you need more time, comment here to let us know\n- If you can't work on this, let us know so we can reassign\n\n💡 **Tip:** Even a draft PR shows progress!\n\nThanks for contributing! 🚀`
                 });
-              }
-              
-              // 48 hour auto-unassignment (between 48-54 hours)
-              if (hoursSinceAssignment >= 48 && hoursSinceAssignment < 54 && !linkedPR) {
-                console.log(`Auto-unassigning issue #${issue.number} - no PR after 48 hours`);
-                
-                // Unassign the contributor
-                await github.rest.issues.removeAssignees({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issue.number,
-                  assignees: [assignee]
-                });
-                
-                // Add comment explaining the unassignment
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issue.number,
-                  body: `⚠️ **Auto-Unassigned**\n\nHey @${assignee}, this issue has been unassigned because no PR was linked after 48 hours.\n\n📋 **What happened:**\n- Issue was assigned 48+ hours ago\n- No PR was found that references this issue\n- Auto-unassignment policy triggered\n\n💡 **Want to work on this again?**\n- Comment below to request reassignment\n- Make sure you can commit to working on it promptly\n\n🌟 **For others:**\nThis issue is now available! Comment if you'd like to work on it.\n\nThanks for understanding! 🙏`
-                });
-                
-                // Add "help wanted" label to make it available again
-                try {
-                  await github.rest.issues.addLabels({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: issue.number,
-                    labels: ['help wanted']
-                  });
-                } catch (error) {
-                  console.log(`Could not add label (may not exist): ${error.message}`);
-                }
               }
               
               // Log if PR exists

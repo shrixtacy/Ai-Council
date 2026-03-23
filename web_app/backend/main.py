@@ -9,10 +9,9 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 import jwt
-
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,13 +22,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
-
-# Add ai_council to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from ai_council.core.models import ExecutionMode
 from ai_council.main import AICouncil
-
 
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -59,9 +53,81 @@ class RateLimitHeaderMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class TaskManager:
+    """Tracks in-flight tasks to allow graceful shutdown waiting."""
+    def __init__(self):
+        self.active_tasks: Set[asyncio.Task] = set()
+
+    def add(self, task: asyncio.Task):
+        self.active_tasks.add(task)
+
+    def remove(self, task: asyncio.Task):
+        self.active_tasks.discard(task)
+
+    async def wait_for_completion(self, timeout: float = 15.0):
+        """Wait for all tracked tasks to complete, or cancel them after timeout."""
+        if not self.active_tasks:
+            return
+        
+        logging.info(f"Waiting for {len(self.active_tasks)} in-flight tasks to complete...")
+        deadline = time.time() + timeout
+        
+        # CodeRabbit Fix: Loop to continuously re-evaluate the task set for late-arrivers
+        while self.active_tasks:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            
+            # Use FIRST_COMPLETED and a short timeout to wake up and catch newly added tasks
+            await asyncio.wait(
+                self.active_tasks, 
+                timeout=min(1.0, remaining), 
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+        if self.active_tasks:
+            pending = list(self.active_tasks)
+            logging.warning(f"{len(pending)} tasks did not complete in time. Cancelling them...")
+            for task in pending:
+                task.cancel()
+            
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=1.0,
+                )
+            except asyncio.TimeoutError:
+                logging.warning(
+                    "%s tasks did not acknowledge cancellation before shutdown cleanup",
+                    len([task for task in pending if not task.done()]),
+                )
+
+
+class TaskTrackingMiddleware(BaseHTTPMiddleware):
+    """Middleware to track all HTTP requests instantly to prevent shutdown race conditions."""
+    async def dispatch(self, request: Request, call_next):
+        task = asyncio.current_task()
+        task_manager = getattr(request.app.state, "task_manager", None)
+        
+        if task and task_manager:
+            task_manager.add(task)
+            
+        try:
+            return await call_next(request)
+        finally:
+            if task and task_manager:
+                task_manager.remove(task)
+
+
+def check_shutdown_status(request: Request):
+    """Dependency to reject new requests if the server is shutting down."""
+    if request.app.state.is_shutting_down.is_set():
+        raise HTTPException(status_code=503, detail="Server is currently shutting down. Please try again later.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize AI Council on startup."""
+    """Initialize AI Council on startup and handle graceful shutdown."""
     try:
         config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
         if config_path.exists():
@@ -69,7 +135,9 @@ async def lifespan(app: FastAPI):
 
         app.state.ai_council = AICouncil(config_path if config_path.exists() else None)
         print("[OK] AI Council initialized successfully")
+        
         yield
+        
     except RuntimeError as exc:
         if "Configuration validation failed" in str(exc):
             print("\n" + "=" * 60)
@@ -77,14 +145,41 @@ async def lifespan(app: FastAPI):
             print("=" * 60)
             print(str(exc).replace("Configuration validation failed:", "").strip())
             print("=" * 60 + "\n")
-            raise
-        print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
-        raise
-    except Exception as exc:  # pragma: no cover - defensive startup logging
-        print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
+        else:
+            print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
 
+    except Exception as exc:
+        print(f"[ERROR] AI Council lifecycle error: {str(exc)}")
+        raise
 
+    finally:
+        print("\n[INFO] Initiating graceful shutdown sequence...")
+        app.state.is_shutting_down.set()
+        
+        print("[INFO] Waiting for in-flight tasks to complete...")
+        await app.state.task_manager.wait_for_completion(timeout=15.0)
+        
+        print("[INFO] Closing active WebSocket connections...")
+        await ws_manager.close_all()
+        
+        print("[INFO] Cleaning up persistent layers and caching...")
+        ai_council = getattr(app.state, "ai_council", None)
+        # CodeRabbit Fix: Explicitly delegate teardown sequencing to AICouncil.shutdown()
+        if ai_council and hasattr(ai_council, "shutdown"):
+            try:
+                if inspect.iscoroutinefunction(ai_council.shutdown):
+                    await ai_council.shutdown()
+                else:
+                    ai_council.shutdown()
+                print("[OK] Successfully executed AI Council `shutdown`")
+            except Exception as e:
+                print(f"[ERROR] Failed during AI Council `shutdown`: {e}")
+
+        print("[OK] Graceful shutdown complete.")
+
+
+# Existing FastAPI app initialization (no change, just uses updated lifespan)
 app = FastAPI(title="AI Council API", version="1.0.0", lifespan=lifespan)
 
 # Load environment variables
@@ -95,17 +190,21 @@ else:
     load_dotenv()
 
 # CORS configuration
+env = os.getenv("ENVIRONMENT", "production").strip().lower()
 allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "")
 if allowed_origins_str:
     allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
-else:
+elif env == "development":
     allowed_origins = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ]
+else:
+    allowed_origins = []
 
+app.add_middleware(TaskTrackingMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(RateLimitHeaderMiddleware)
 app.add_middleware(
@@ -123,7 +222,6 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     """Custom 429 response with retry hints."""
     retry_after = 900
     try:
-        # slowapi detail often looks like: "100 per 15 minute"
         detail_text = exc.detail
         if isinstance(detail_text, str):
             parts = detail_text.split(" ")
@@ -214,12 +312,12 @@ def serialize_response(response) -> Dict[str, Any]:
     }
 
 
-@app.get("/")
+@app.get("/", dependencies=[Depends(check_shutdown_status)])
 async def root():
     return {"message": "AI Council API", "version": "1.0.0", "status": "operational"}
 
 
-@app.get("/api/status")
+@app.get("/api/status", dependencies=[Depends(check_shutdown_status)])
 async def get_status(ai_council: AICouncil = Depends(get_ai_council)):
     try:
         return ai_council.get_system_status()
@@ -227,10 +325,9 @@ async def get_status(ai_council: AICouncil = Depends(get_ai_council)):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.post("/api/process")
+@app.post("/api/process", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def process_request(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
-    del request  # used by limiter decorator
     try:
         mode = normalize_mode(req.mode)
         response = await maybe_await(ai_council.process_request(req.query, mode))
@@ -239,10 +336,9 @@ async def process_request(request: Request, req: RequestModel, ai_council: AICou
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.post("/api/estimate")
+@app.post("/api/estimate", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def estimate_cost(request: Request, req: EstimateModel, ai_council: AICouncil = Depends(get_ai_council)):
-    del request  # used by limiter decorator
     try:
         mode = normalize_mode(req.mode)
         return ai_council.estimate_cost(req.query, mode)
@@ -250,8 +346,8 @@ async def estimate_cost(request: Request, req: EstimateModel, ai_council: AICoun
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.post("/api/analyze")
-async def analyze_tradeoffs(req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
+@app.post("/api/analyze", dependencies=[Depends(check_shutdown_status)])
+async def analyze_tradeoffs(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
     try:
         return await maybe_await(ai_council.analyze_tradeoffs(req.query))
     except Exception as exc:
@@ -265,9 +361,11 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
 class WebSocketManager:
     def __init__(self):
-        self.active_connections: int = 0
+        self.active_sockets: Set[WebSocket] = set()
         self.ip_connections: Dict[str, int] = {}
         self.message_timestamps: Dict[WebSocket, List[float]] = {}
+        self.active_connections_set = set()  # NEW: Track active WebSocket connections
+        
 
         self.MAX_CONNECTIONS = 1000
         self.MAX_IP_CONNECTIONS = 10
@@ -278,7 +376,6 @@ class WebSocketManager:
         token = websocket.query_params.get("token")
         if not token:
             try:
-                import asyncio
                 auth_payload = await asyncio.wait_for(websocket.receive_json(), timeout=5)
                 token = auth_payload.get("token") if isinstance(auth_payload, dict) else None
             except Exception:
@@ -294,32 +391,33 @@ class WebSocketManager:
             return False
 
     def connect(self, websocket: WebSocket, client_ip: str) -> bool:
-        if self.active_connections >= self.MAX_CONNECTIONS:
+        if len(self.active_sockets) >= self.MAX_CONNECTIONS:
             return False
         
         current_ip_count = self.ip_connections.get(client_ip, 0)
         if current_ip_count >= self.MAX_IP_CONNECTIONS:
             return False
 
-        self.active_connections += 1
+        self.active_sockets.add(websocket)
         self.ip_connections[client_ip] = current_ip_count + 1
         self.message_timestamps[websocket] = []
+
         return True
 
     def disconnect(self, websocket: WebSocket, client_ip: str):
+        self.active_sockets.discard(websocket)
         if websocket in self.message_timestamps:
             del self.message_timestamps[websocket]
-            self.active_connections = max(0, self.active_connections - 1)
-            if client_ip in self.ip_connections:
-                self.ip_connections[client_ip] = max(0, self.ip_connections[client_ip] - 1)
-                if self.ip_connections[client_ip] == 0:
-                    del self.ip_connections[client_ip]
+            
+        if client_ip in self.ip_connections:
+            self.ip_connections[client_ip] = max(0, self.ip_connections[client_ip] - 1)
+            if self.ip_connections[client_ip] == 0:
+                del self.ip_connections[client_ip]
 
     def check_rate_limit(self, websocket: WebSocket) -> bool:
         """Returns True if limits are exceeded."""
         now = time.time()
         timestamps = self.message_timestamps.get(websocket, [])
-        # Remove timestamps older than RATE_LIMIT_WINDOW
         timestamps = [ts for ts in timestamps if now - ts < self.RATE_LIMIT_WINDOW]
         
         if len(timestamps) >= self.RATE_LIMIT_MESSAGES:
@@ -330,11 +428,44 @@ class WebSocketManager:
         self.message_timestamps[websocket] = timestamps
         return False
 
+    async def close_all(self):
+        """Cleanly notifies and closes all active websocket connections during shutdown."""
+        sockets = list(self.active_sockets)
+        
+        async def _close_socket(ws: WebSocket):
+            try:
+                await asyncio.wait_for(
+                    ws.send_json({"type": "system", "message": "Server is shutting down. Connection closing."}),
+                    timeout=1.0,
+                )
+            except Exception:
+                logging.getLogger(__name__).debug("Failed to send websocket shutdown notice", exc_info=True)
+                
+            try:
+                await asyncio.wait_for(
+                    ws.close(code=1001, reason="Server going down"),
+                    timeout=1.0,
+                )
+            except Exception:
+                logging.getLogger(__name__).debug("Failed to close websocket during shutdown", exc_info=True)
+
+        if sockets:
+            await asyncio.gather(*(_close_socket(ws) for ws in sockets), return_exceptions=True)
+
+
 ws_manager = WebSocketManager()
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if websocket.app.state.is_shutting_down.is_set():
+        try:
+            await websocket.accept()
+            await websocket.close(code=1013, reason="Server is shutting down")
+        except Exception:
+            pass
+        return
+
     await websocket.accept()
     
     client = websocket.client
@@ -351,27 +482,66 @@ async def websocket_endpoint(websocket: WebSocket):
 
         ai_council: AICouncil = websocket.app.state.ai_council
 
-        while True:
-            data = await websocket.receive_text()
-            
+        while not websocket.app.state.is_shutting_down.is_set():
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=2.0)
+            except asyncio.TimeoutError:
+                continue 
+
+            if websocket.app.state.is_shutting_down.is_set():
+                try:
+                    await websocket.close(code=1013, reason="Server is shutting down")
+                except Exception:
+                    pass
+                break
+
             if ws_manager.check_rate_limit(websocket):
                 await websocket.send_json({"type": "error", "message": "Rate limit exceeded. Please wait."})
                 await websocket.close(code=1008, reason="Rate limit exceeded")
                 break
                 
-            request_data = json.loads(data)
+            try:
+                request_data = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON format"})
+                continue
 
             query = request_data.get("query", "")
             mode = request_data.get("mode", "balanced")
 
             await websocket.send_json({"type": "status", "message": "Processing your request..."})
 
-            response = await maybe_await(ai_council.process_request(query, normalize_mode(mode)))
+            # CodeRabbit Fix: Final check immediately before spawning background job
+            if websocket.app.state.is_shutting_down.is_set():
+                try:
+                    await websocket.send_json({"type": "error", "message": "Server is shutting down. Request aborted."})
+                    await websocket.close(code=1013, reason="Server is shutting down")
+                except Exception:
+                    pass
+                break
 
-            await websocket.send_json({"type": "result", **serialize_response(response)})
+            task = asyncio.create_task(maybe_await(ai_council.process_request(query, normalize_mode(mode))))
+            websocket.app.state.task_manager.add(task)
+            
+            try:
+                response = await task
+                await websocket.send_json({"type": "result", **serialize_response(response)})
+            except asyncio.CancelledError:
+                try:
+                    await websocket.send_json({"type": "error", "message": "Request cancelled due to server shutdown."})
+                except Exception:
+                    pass
+                break
+            except Exception as e:
+                logging.error(f"Error processing WS request: {e}")
+                await websocket.send_json({"type": "error", "message": "Error processing request"})
+            finally:
+                websocket.app.state.task_manager.remove(task)
 
     except WebSocketDisconnect:
         pass
+    except asyncio.CancelledError:
+        pass  
     except Exception as exc:
         logging.getLogger(__name__).exception("Unexpected websocket error")
         try:
@@ -384,5 +554,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    host = os.getenv("APP_HOST", "127.0.0.1")
+    port = int(os.getenv("APP_PORT", "8000"))
+    uvicorn.run(app, host=host, port=port)

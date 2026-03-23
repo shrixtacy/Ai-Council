@@ -107,17 +107,18 @@ class SynthesisLayerImpl(SynthesisLayer):
         normalized = normalized.strip()
         
         # Ensure sentences end with proper punctuation
-        sentences = normalized.split('. ')
-        normalized_sentences = []
+        # Split by punctuation followed by space or by line breaks
+        parts = re.split(r'(?<=[.!?])\s+|\n+', normalized)
+        normalized_parts = []
         
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if sentence and not sentence.endswith(('.', '!', '?', ':')):
-                sentence += '.'
-            if sentence:
-                normalized_sentences.append(sentence)
+        for part in parts:
+            part = part.strip()
+            if part:
+                if not part.endswith(('.', '!', '?', ':')):
+                    part += '.'
+                normalized_parts.append(part)
         
-        normalized = '. '.join(normalized_sentences)
+        normalized = ' '.join(normalized_parts)
         
         # Remove redundant phrases and normalize tone
         normalized = self._normalize_tone(normalized)

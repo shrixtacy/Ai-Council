@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from enum import Enum
 import os
 import diskcache
+import hashlib  
+import json
 
 from ..core.interfaces import ModelRegistry, ModelSelection
 from ..core.models import (
@@ -477,9 +479,15 @@ class CostOptimizer:
         execution_mode: ExecutionMode, 
         available_models: List[str]
     ) -> str:
-        """Create a cache key for optimization results."""
-        models_hash = hash(tuple(sorted(available_models)))
-        return f"{subtask.task_type}_{execution_mode.value}_{subtask.priority.value}_{subtask.risk_level.value}_{models_hash}"
+        models_key = json.dumps(sorted(available_models), separators=(",", ":"))
+        models_hash = hashlib.sha256(models_key.encode("utf-8")).hexdigest()
+        content = subtask.content
+        if isinstance(content, (dict, list)):
+            content_str = json.dumps(content, sort_keys=True)
+        else:
+            content_str = str(content)  
+        content_hash = hashlib.sha256(content_str.encode('utf-8')).hexdigest()
+        return f"{subtask.task_type}_{execution_mode.value}_{subtask.priority.value}_{subtask.risk_level.value}_{models_hash}_{content_hash}"
     
     def _build_mode_weights(self) -> Dict[OptimizationStrategy, Dict[str, float]]:
         """Build optimization weights for different strategies."""
