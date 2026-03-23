@@ -212,7 +212,8 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         self, 
         subtasks: List[Subtask], 
         execution_plan, 
-        execution_mode: ExecutionMode
+        execution_mode: ExecutionMode,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> List[AgentResponse]:
         """
         Stage 5: Execute all subtasks with resilience handling.
@@ -226,7 +227,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             List[AgentResponse]: Responses from all subtasks
         """
         return await self._execute_subtasks_with_resilience(
-            subtasks, execution_plan, execution_mode
+            subtasks, execution_plan, execution_mode, progress_callback
         )
     
     def _stage_check_partial_failure(
@@ -357,7 +358,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     # =========================================================================
     
     @with_adaptive_timeout("request_processing", "orchestration_layer")
-    async def process_request(self, user_input: str, execution_mode: ExecutionMode) -> FinalResponse:
+    async def process_request(self, user_input: str, execution_mode: ExecutionMode, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> FinalResponse:
         """
         Process a user request through the entire pipeline.
         
@@ -371,6 +372,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         Args:
             user_input: Raw user input to process
             execution_mode: The execution mode (fast, balanced, best_quality)
+            progress_callback: Optional callback for progress updates
             
         Returns:
             FinalResponse: The final processed response
@@ -403,7 +405,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             
             # Stage 5: Execute Subtasks
             agent_responses = await self._stage_execute_subtasks(
-                subtasks, execution_plan, execution_mode
+                subtasks, execution_plan, execution_mode, progress_callback
             )
             execution_metadata.execution_path.append("subtask_execution")
             execution_metadata.models_used = list(set(
@@ -594,16 +596,44 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         self, 
         subtasks: List[Subtask], 
         execution_plan, 
-        execution_mode: ExecutionMode
+        execution_mode: ExecutionMode,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> List[AgentResponse]:
         """Execute subtasks with comprehensive resilience handling."""
         all_responses = []
         failed_groups = 0
+        from ..core.models import Task, TaskIntent
         
         # Execute parallel groups sequentially
         for group_index, group in enumerate(execution_plan.parallel_groups):
-            group_responses = await self._execute_parallel_group_resilient(group, execution_mode)
+            group_responses = await self._execute_parallel_group_resilient(group, execution_mode, progress_callback)
             all_responses.extend(group_responses)
+            
+            # Re-planning Stage
+            critical_failure = False
+            for subtask, response in zip(group, group_responses):
+                if getattr(subtask, 'is_essential', True) and (not response.success or getattr(response.self_assessment, 'confidence_score', 0) < 0.5):
+                    logger.warning("Critical subtask failed, triggering replanning", extra={"subtask_id": subtask.id})
+                    critical_failure = True
+                    break
+                    
+            if critical_failure:
+                remaining_subtasks = [s for g in execution_plan.parallel_groups[group_index+1:] for s in g]
+                if remaining_subtasks:
+                    logger.info("Triggering re-planning stage for remaining subtasks")
+                    recovery_task = Task(
+                        content="Recover from failure in subtask and complete processing. Synthesize a simplified path.", 
+                        intent=TaskIntent.MODIFICATION, 
+                        execution_mode=execution_mode
+                    )
+                    try:
+                        new_subtasks = await self._decompose_task_protected(recovery_task)
+                        new_plan = await self._stage_plan_execution(new_subtasks)
+                        execution_plan.parallel_groups[group_index+1:] = new_plan.parallel_groups
+                        logger.info("Re-planning successful", extra={"new_groups_count": len(new_plan.parallel_groups)})
+                    except Exception as e:
+                        logger.error("Failed to re-plan", extra={"error": str(e)})
+                        break
             
             # Check group success rate
             group_success_rate = sum(1 for resp in group_responses if resp.success) / len(group_responses)
@@ -621,10 +651,11 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     async def _execute_parallel_group_resilient(
         self, 
         subtasks: List[Subtask], 
-        execution_mode: ExecutionMode
+        execution_mode: ExecutionMode,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> List[AgentResponse]:
         """Execute a group of subtasks with resilience mechanisms."""
-        coros = [self._execute_single_subtask(subtask, execution_mode) for subtask in subtasks]
+        coros = [self._execute_single_subtask(subtask, execution_mode, progress_callback) for subtask in subtasks]
         responses = await asyncio.gather(*coros)
         
         return list(responses)
@@ -632,7 +663,8 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     async def _execute_single_subtask(
         self, 
         subtask: Subtask, 
-        execution_mode: ExecutionMode
+        execution_mode: ExecutionMode,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> AgentResponse:
         """Execute a single subtask with full error handling."""
         try:
@@ -651,9 +683,10 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                     )
             
             # Get available models
+            models = self.model_registry.get_models_for_task_type(subtask.task_type)
             available_models = [
                 m.get_model_id() 
-                for m in self.model_registry.get_models_for_task_type(subtask.task_type)
+                for m in models
             ]
             
             if not available_models:
@@ -674,7 +707,6 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             logger.info("Cost-optimized selection", extra={"reasoning": optimization.reasoning})
             
             # Get the actual model instance
-            models = self.model_registry.get_models_for_task_type(subtask.task_type)
             selected_model = next(
                 (m for m in models if m.get_model_id() == optimization.recommended_model),
                 None
@@ -699,13 +731,40 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 subtask.id,
                 selected_model.get_model_id(),
                 subtask,
-                selected_model
+                selected_model,
+                progress_callback=progress_callback
             )
+
+            # Semantic Recovery Logic
+            if not response.success or (getattr(response, 'self_assessment', None) and response.self_assessment.confidence_score < 0.5):
+                logger.info("Semantic recovery triggered", extra={"subtask_id": subtask.id})
+                # Broaden the prompt
+                subtask.content = f"Please provide a comprehensive and detailed response to the following: {subtask.content}"
+                
+                # Pick a more reliable model
+                better_models = sorted(
+                    models, 
+                    key=lambda m: self.model_registry.get_model_capabilities(m.get_model_id()).reliability_score, 
+                    reverse=True
+                )
+                better_model = better_models[0] if better_models else selected_model
+                
+                response = await timeout_handler.execute_with_timeout(
+                    self.execution_agent.execute,
+                    adaptive_timeout_manager.get_adaptive_timeout("subtask_execution"),
+                    "subtask_execution",
+                    "orchestration_layer",
+                    subtask.id,
+                    better_model.get_model_id(),
+                    subtask,
+                    better_model,
+                    progress_callback=progress_callback
+                )
             
             # Update cost optimizer with actual performance
             if response.success and response.self_assessment:
                 self.cost_optimizer.update_performance_history(
-                    optimization.recommended_model,
+                    response.model_used,
                     response.self_assessment.estimated_cost,
                     response.self_assessment.confidence_score
                 )

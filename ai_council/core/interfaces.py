@@ -1,7 +1,7 @@
 """Abstract base classes and interfaces for AI Council system components."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable
 
 from .models import (
     Task, Subtask, AgentResponse, FinalResponse, SelfAssessment,
@@ -198,7 +198,7 @@ class ExecutionAgent(ABC):
     """Abstract base class for agents that execute subtasks using AI models."""
     
     @abstractmethod
-    async def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
+    async def execute(self, subtask: Subtask, model: AIModel, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> AgentResponse:
         """Execute a subtask using the specified AI model.
         
         Args:

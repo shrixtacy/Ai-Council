@@ -86,6 +86,7 @@ class Subtask:
     content: str = ""
     task_type: Optional[TaskType] = None
     priority: Priority = Priority.MEDIUM
+    is_essential: bool = True
     risk_level: RiskLevel = RiskLevel.LOW
     accuracy_requirement: float = 0.8
     estimated_cost: float = 0.0

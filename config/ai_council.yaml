@@ -7,6 +7,8 @@ execution:
   default_timeout_seconds: 60.0
   enable_arbitration: true  # Arbitration enabled for conflict resolution
   enable_synthesis: true
+  use_mq: true
+  redis_url: "redis://localhost:6379"
   strategy_timeouts:
     model_execution: 30.0
     analysis: 10.0

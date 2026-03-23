@@ -128,9 +128,6 @@ def check_shutdown_status(request: Request):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize AI Council on startup and handle graceful shutdown."""
-    app.state.is_shutting_down = asyncio.Event()
-    app.state.task_manager = TaskManager()
-    
     try:
         config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
         if config_path.exists():
@@ -182,6 +179,7 @@ async def lifespan(app: FastAPI):
         print("[OK] Graceful shutdown complete.")
 
 
+# Existing FastAPI app initialization (no change, just uses updated lifespan)
 app = FastAPI(title="AI Council API", version="1.0.0", lifespan=lifespan)
 
 # Load environment variables
@@ -362,6 +360,8 @@ class WebSocketManager:
         self.active_sockets: Set[WebSocket] = set()
         self.ip_connections: Dict[str, int] = {}
         self.message_timestamps: Dict[WebSocket, List[float]] = {}
+        self.active_connections_set = set()  # NEW: Track active WebSocket connections
+        
 
         self.MAX_CONNECTIONS = 1000
         self.MAX_IP_CONNECTIONS = 10

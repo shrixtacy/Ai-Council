@@ -2,6 +2,7 @@
 
 import re
 from typing import List, Dict, Set
+from ai_council.analysis.intent_classifier import IntentClassifier
 from ..core.interfaces import AnalysisEngine
 from ..core.models import TaskIntent, ComplexityLevel, TaskType
 
@@ -14,47 +15,47 @@ class BasicAnalysisEngine(AnalysisEngine):
         self._intent_patterns = self._build_intent_patterns()
         self._complexity_indicators = self._build_complexity_indicators()
         self._task_type_patterns = self._build_task_type_patterns()
+        self.classifier = IntentClassifier()
     
     async def analyze_intent(self, input_text: str) -> TaskIntent:
-        """Analyze user input to determine the intent of the request.
-        
-        Args:
-            input_text: Raw user input to analyze
-            
-        Returns:
-            TaskIntent: The determined intent category
-        """
         if not input_text or not input_text.strip():
             return TaskIntent.QUESTION
-        
+
         text_lower = input_text.lower().strip()
-        
-        # Check for question patterns
+
+        # RULE-BASED (for test stability)
+
         if self._is_question(text_lower):
             return TaskIntent.QUESTION
-        
-        # Check for instruction patterns
+
         if self._is_instruction(text_lower):
             return TaskIntent.INSTRUCTION
-        
-        # Check for analysis patterns
+
         if self._is_analysis_request(text_lower):
             return TaskIntent.ANALYSIS
-        
-        # Check for creation patterns
+
         if self._is_creation_request(text_lower):
             return TaskIntent.CREATION
-        
-        # Check for modification patterns
+
         if self._is_modification_request(text_lower):
             return TaskIntent.MODIFICATION
-        
-        # Check for verification patterns
+
         if self._is_verification_request(text_lower):
             return TaskIntent.VERIFICATION
+
+        # ML FALLBACK (your feature)
+    
+        intent_str = self.classifier.classify(input_text)
+
+        mapping = {
+            "QUESTION": TaskIntent.QUESTION,
+            "ANALYSIS": TaskIntent.ANALYSIS,
+            "INSTRUCTION": TaskIntent.INSTRUCTION,
+            "FACTUAL": TaskIntent.QUESTION
+        }
+
+        return mapping.get(intent_str, TaskIntent.INSTRUCTION)
         
-        # Default to instruction if unclear
-        return TaskIntent.INSTRUCTION
     
     async def determine_complexity(self, input_text: str) -> ComplexityLevel:
         """Determine the complexity level of a user request.

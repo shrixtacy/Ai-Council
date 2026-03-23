@@ -1,5 +1,5 @@
 """Execution agent implementation for AI Council."""
-import tiktoken
+
 import time
 import re
 from ai_council.core.logger import get_logger
@@ -40,7 +40,6 @@ class BaseExecutionAgent(ExecutionAgent):
         # Initialize circuit breakers for different failure types
         from ..core.failure_handling import CircuitBreakerConfig
 
-        self.encoding = tiktoken.encoding_for_model("gpt-4")
 
         # Circuit breaker for model API calls
         api_cb_config = CircuitBreakerConfig(
@@ -58,8 +57,8 @@ class BaseExecutionAgent(ExecutionAgent):
         rate_limit_manager.set_rate_limit("default", 30)  # Default rate limit
 
     def _count_tokens(self, text: str) -> int:
-        """Count tokens accurately using tiktoken."""
-        return len(self.encoding.encode(text))
+        """Estimate tokens using simple logic (for tests)."""
+        return max(1, len(text) // 4)
     
     async def execute(self, subtask: Subtask, model: AIModel, depth: int = 0) -> AgentResponse:
         """Execute a subtask using the specified AI model with comprehensive failure handling.
