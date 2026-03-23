@@ -127,7 +127,7 @@ def check_shutdown_status(request: Request):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize resources on startup and clean up on shutdown."""
+    """Initialize AI Council on startup and handle graceful shutdown."""
     app.state.is_shutting_down = asyncio.Event()
     app.state.task_manager = TaskManager()
     
@@ -151,8 +151,9 @@ async def lifespan(app: FastAPI):
         else:
             print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
-    except Exception as exc:  
-        print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
+
+    except Exception as exc:
+        print(f"[ERROR] AI Council lifecycle error: {str(exc)}")
         raise
 
     finally:
@@ -396,6 +397,7 @@ class WebSocketManager:
         self.active_sockets.add(websocket)
         self.ip_connections[client_ip] = current_ip_count + 1
         self.message_timestamps[websocket] = []
+
         return True
 
     def disconnect(self, websocket: WebSocket, client_ip: str):
