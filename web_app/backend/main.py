@@ -77,7 +77,6 @@ class TaskManager:
             for task in pending:
                 task.cancel()
             
-            # CodeRabbit Fix: Wait for tasks to acknowledge cancellation to prevent overlap with cleanup
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*pending, return_exceptions=True),
@@ -125,7 +124,6 @@ async def lifespan(app: FastAPI):
         app.state.ai_council = AICouncil(config_path if config_path.exists() else None)
         print("[OK] AI Council initialized successfully")
         
-        # Yield control to FastAPI (app runs while in this state)
         yield
         
     except RuntimeError as exc:
@@ -138,7 +136,7 @@ async def lifespan(app: FastAPI):
         else:
             print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
-    except Exception as exc:  # pragma: no cover - defensive startup logging
+    except Exception as exc:  
         print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
 
@@ -148,14 +146,16 @@ async def lifespan(app: FastAPI):
         # 1. Stop accepting new requests
         app.state.is_shutting_down.set()
         
-        # 2. Notify and close active WebSockets
+        # 2. Wait for in-flight tasks to finish (15-second timeout)
+        # CodeRabbit Fix: Wait for tasks BEFORE closing websockets, so clients get their answers
+        print("[INFO] Waiting for in-flight tasks to complete...")
+        await app.state.task_manager.wait_for_completion(timeout=15.0)
+        
+        # 3. Notify and close active WebSockets
         print("[INFO] Closing active WebSocket connections...")
         await ws_manager.close_all()
         
-        # 3. Wait for in-flight tasks to finish (15-second timeout)
-        await app.state.task_manager.wait_for_completion(timeout=15.0)
-        
-        # 4. Flush/Cleanup AI Council resources (diskcache, buffers, etc.)
+        # 4. Flush/Cleanup AI Council resources
         print("[INFO] Cleaning up persistent layers and caching...")
         ai_council = getattr(app.state, "ai_council", None)
         if ai_council:
@@ -168,7 +168,7 @@ async def lifespan(app: FastAPI):
                         else:
                             method()
                         print(f"[OK] Successfully executed AI Council `{method_name}`")
-                        break  # Execute only the primary shutdown method
+                        break  
                     except Exception as e:
                         print(f"[ERROR] Failed during AI Council `{method_name}`: {e}")
 
@@ -318,7 +318,6 @@ async def get_status(ai_council: AICouncil = Depends(get_ai_council)):
 @app.post("/api/process", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def process_request(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
-    # CodeRabbit Fix: Removed `del request` here to prevent UnboundLocalError
     async with track_in_flight_task(request):
         try:
             mode = normalize_mode(req.mode)
@@ -331,7 +330,6 @@ async def process_request(request: Request, req: RequestModel, ai_council: AICou
 @app.post("/api/estimate", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def estimate_cost(request: Request, req: EstimateModel, ai_council: AICouncil = Depends(get_ai_council)):
-    # CodeRabbit Fix: Removed `del request` here to prevent UnboundLocalError
     async with track_in_flight_task(request):
         try:
             mode = normalize_mode(req.mode)
@@ -410,7 +408,6 @@ class WebSocketManager:
         """Returns True if limits are exceeded."""
         now = time.time()
         timestamps = self.message_timestamps.get(websocket, [])
-        # Remove timestamps older than RATE_LIMIT_WINDOW
         timestamps = [ts for ts in timestamps if now - ts < self.RATE_LIMIT_WINDOW]
         
         if len(timestamps) >= self.RATE_LIMIT_MESSAGES:
@@ -424,12 +421,27 @@ class WebSocketManager:
     async def close_all(self):
         """Cleanly notifies and closes all active websocket connections during shutdown."""
         sockets = list(self.active_sockets)
-        for ws in sockets:
+        
+        # CodeRabbit Fix: Added per-socket timeouts run concurrently to prevent stalls
+        async def _close_socket(ws: WebSocket):
             try:
-                await ws.send_json({"type": "system", "message": "Server is shutting down. Connection closing."})
-                await ws.close(code=1001, reason="Server going down")
+                await asyncio.wait_for(
+                    ws.send_json({"type": "system", "message": "Server is shutting down. Connection closing."}),
+                    timeout=1.0,
+                )
             except Exception:
-                pass  # Ignore errors for dead sockets during shutdown
+                logging.getLogger(__name__).debug("Failed to send websocket shutdown notice", exc_info=True)
+                
+            try:
+                await asyncio.wait_for(
+                    ws.close(code=1001, reason="Server going down"),
+                    timeout=1.0,
+                )
+            except Exception:
+                logging.getLogger(__name__).debug("Failed to close websocket during shutdown", exc_info=True)
+
+        if sockets:
+            await asyncio.gather(*(_close_socket(ws) for ws in sockets), return_exceptions=True)
 
 
 ws_manager = WebSocketManager()
@@ -437,7 +449,6 @@ ws_manager = WebSocketManager()
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # CodeRabbit Fix: Accept the connection first so we can actually send a 1013 WS code
     if websocket.app.state.is_shutting_down.is_set():
         try:
             await websocket.accept()
@@ -467,6 +478,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=2.0)
             except asyncio.TimeoutError:
                 continue 
+
+            # CodeRabbit Fix: Re-check immediately after yielding control to receive_text
+            if websocket.app.state.is_shutting_down.is_set():
+                try:
+                    await websocket.close(code=1013, reason="Server is shutting down")
+                except Exception:
+                    pass
+                break
 
             if ws_manager.check_rate_limit(websocket):
                 await websocket.send_json({"type": "error", "message": "Rate limit exceeded. Please wait."})
