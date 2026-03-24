@@ -356,6 +356,7 @@ class WebSocketManager:
         self.active_sockets: Set[WebSocket] = set()
         self.ip_connections: Dict[str, int] = {}
         self.message_timestamps: Dict[WebSocket, List[float]] = {}
+        self.active_connections = 0
 
         self.MAX_CONNECTIONS = 1000
         self.MAX_IP_CONNECTIONS = 10
