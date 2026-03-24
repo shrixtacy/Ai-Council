@@ -129,7 +129,7 @@ def check_shutdown_status(request: Request):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize AI Council on startup and handle graceful shutdown."""
+    """Initialize AI Council on startup."""
     try:
         config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
         if config_path.exists():
@@ -137,26 +137,7 @@ async def lifespan(app: FastAPI):
 
         app.state.ai_council = AICouncil(config_path if config_path.exists() else None)
         print("[OK] AI Council initialized successfully")
-
-        # Application runs here
         yield
-
-        # NEW: GRACEFUL SHUTDOWN LOGIC
-    
-
-        print("🛑 Shutdown initiated...")
-
-        # NEW: Gracefully close all active WebSocket connections
-        print("Closing WebSockets...")
-
-        for ws in list(ws_manager.active_connections_set):
-            try:
-                await ws.close(code=1001)  # Normal closure
-            except Exception:
-                pass  # Ignore errors during shutdown
-
-        print("✅ Shutdown complete")
-
     except RuntimeError as exc:
         if "Configuration validation failed" in str(exc):
             print("\n" + "=" * 60)
@@ -164,10 +145,11 @@ async def lifespan(app: FastAPI):
             print("=" * 60)
             print(str(exc).replace("Configuration validation failed:", "").strip())
             print("=" * 60 + "\n")
+            raise
+        print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
-
-    except Exception as exc:
-        print(f"[ERROR] AI Council lifecycle error: {str(exc)}")
+    except Exception as exc:  # pragma: no cover - defensive startup logging
+        print(f"[ERROR] Failed to initialize AI Council: {str(exc)}")
         raise
 
     finally:
@@ -196,7 +178,6 @@ async def lifespan(app: FastAPI):
         print("[OK] Graceful shutdown complete.")
 
 
-# Existing FastAPI app initialization (no change, just uses updated lifespan)
 app = FastAPI(title="AI Council API", version="1.0.0", lifespan=lifespan)
 
 # Load environment variables
@@ -341,7 +322,7 @@ async def get_status(ai_council: AICouncil = Depends(get_ai_council)):
 @app.post("/api/process", dependencies=[Depends(check_shutdown_status)])
 @limiter.limit("100/15minutes")
 async def process_request(request: Request, req: RequestModel, ai_council: AICouncil = Depends(get_ai_council)):
-    del request
+    del request  # used by limiter decorator
     try:
         mode = normalize_mode(req.mode)
         response = await maybe_await(ai_council.process_request(req.query, mode))
@@ -375,8 +356,6 @@ class WebSocketManager:
         self.active_sockets: Set[WebSocket] = set()
         self.ip_connections: Dict[str, int] = {}
         self.message_timestamps: Dict[WebSocket, List[float]] = {}
-        self.active_connections_set = set()  # NEW: Track active WebSocket connections
-        
 
         self.MAX_CONNECTIONS = 1000
         self.MAX_IP_CONNECTIONS = 10
@@ -418,9 +397,6 @@ class WebSocketManager:
         self.active_sockets.add(websocket)
         self.ip_connections[client_ip] = current_ip_count + 1
         self.message_timestamps[websocket] = []
-
-        self.active_connections_set.add(websocket)  # NEW: Track active WebSocket connections
-
         return True
 
     def disconnect(self, websocket: WebSocket, client_ip: str):
@@ -432,7 +408,6 @@ class WebSocketManager:
                 self.ip_connections[client_ip] = max(0, self.ip_connections[client_ip] - 1)
                 if self.ip_connections[client_ip] == 0:
                     del self.ip_connections[client_ip]
-        self.active_connections_set.discard(websocket)  # NEW: Remove connection safely
 
     def check_rate_limit(self, websocket: WebSocket) -> bool:
         """Returns True if limits are exceeded."""
