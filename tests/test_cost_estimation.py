@@ -23,9 +23,11 @@ class TestCostEstimation:
         )
 
     def test_estimate_token_usage_split(self, agent, sample_subtask):
-        response = "This is a test response." # 24 chars -> 6 tokens
-        # _build_prompt(subtask) logic is complex, but let's assume it returns something
-        agent._build_prompt = MagicMock(return_value="Prompt content") # 14 chars -> 3 tokens
+        response = "This is a test response."
+        agent._build_prompt = MagicMock(return_value="Prompt content")
+        
+        # Mock _count_tokens to return predictable values
+        agent._count_tokens = MagicMock(side_effect=lambda x: 3 if "Prompt" in x else 6)
         
         usage = agent._estimate_token_usage(response, sample_subtask)
         
@@ -38,6 +40,9 @@ class TestCostEstimation:
         response = "Response"
         agent._build_prompt = MagicMock(return_value="Prompt")
         
+        # Mock _count_tokens
+        agent._count_tokens = MagicMock(side_effect=lambda x: 1 if "Prompt" in x else 2)
+        
         # Mock cost profile: $0.01 per input, $0.02 per output, $0.005 min
         profile = CostProfile(
             cost_per_input_token=0.01,
@@ -46,8 +51,8 @@ class TestCostEstimation:
         )
         mock_registry.get_model_cost_profile.return_value = profile
         
-        # Input tokens: 6 chars // 4 = 1
-        # Output tokens: 8 chars // 4 = 2
+        # Input tokens: 1
+        # Output tokens: 2
         cost = agent._estimate_cost(response, sample_subtask, model_id)
         
         # expected_cost = (1 * 0.01) + (2 * 0.02) = 0.01 + 0.04 = 0.05
@@ -56,8 +61,10 @@ class TestCostEstimation:
 
     def test_estimate_cost_minimum(self, agent, mock_registry, sample_subtask):
         model_id = "test-model"
-        response = "R" # 1 char -> 1 token min
-        agent._build_prompt = MagicMock(return_value="P") # 1 char -> 1 token min
+        response = "R"
+        agent._build_prompt = MagicMock(return_value="P")
+        
+        agent._count_tokens = MagicMock(return_value=1)
         
         # High minimum cost
         profile = CostProfile(
@@ -77,8 +84,9 @@ class TestCostEstimation:
         model_id = "unknown-model"
         mock_registry.get_model_cost_profile.side_effect = KeyError("Model not found")
         
-        agent._build_prompt = MagicMock(return_value="Prompt") # 6 chars -> 1 token
-        response = "Response" # 8 chars -> 2 tokens
+        agent._count_tokens = MagicMock(side_effect=lambda x: 1 if "Prompt" in x else 2)
+        agent._build_prompt = MagicMock(return_value="Prompt")
+        response = "Response"
         
         cost = agent._estimate_cost(response, sample_subtask, model_id)
         
@@ -93,6 +101,8 @@ class TestCostEstimation:
         response = "Test response content"
         agent._build_prompt = MagicMock(return_value="Prompt content")
         
+        agent._count_tokens = MagicMock(side_effect=lambda x: 3 if "Prompt" in x else 5)
+        
         profile = CostProfile(
             cost_per_input_token=0.1,
             cost_per_output_token=0.2
@@ -101,7 +111,8 @@ class TestCostEstimation:
         
         assessment = await agent.generate_self_assessment(response, sample_subtask, model_id)
         
-        # Input (14 chars): 3 tokens. Output (21 chars): 5 tokens.
+        # Input: 3 tokens. Output: 5 tokens.
         # Cost: 3*0.1 + 5*0.2 = 0.3 + 1.0 = 1.3
         assert assessment.estimated_cost == pytest.approx(1.3)
         assert assessment.token_usage == 8
+

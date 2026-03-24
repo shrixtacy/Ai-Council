@@ -2,6 +2,7 @@
 
 import time
 import random
+import asyncio
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
@@ -62,7 +63,7 @@ class MockAIModel(AIModel):
         self._rate_limit_window = 60.0  # 1 minute window
         self._max_requests_per_window = 100
     
-    def generate_response(self, prompt: str, **kwargs) -> str:
+    async def generate_response(self, prompt: str, **kwargs) -> str:
         """Generate a response from the mock AI model.
         
         Args:
@@ -83,11 +84,11 @@ class MockAIModel(AIModel):
             self._check_rate_limit()
             
             # Apply behavior-specific logic
-            self._apply_behavior_effects(prompt, **kwargs)
+            await self._apply_behavior_effects(prompt, **kwargs)
             
             # Simulate processing delay
             if self.response_delay > 0:
-                time.sleep(self.response_delay)
+                await asyncio.sleep(self.response_delay)
             
             # Generate response based on template and parameters
             response = self._generate_mock_response(prompt, **kwargs)
@@ -159,7 +160,7 @@ class MockAIModel(AIModel):
                 error_type="RateLimitError"
             )
     
-    def _apply_behavior_effects(self, prompt: str, **kwargs) -> None:
+    async def _apply_behavior_effects(self, prompt: str, **kwargs) -> None:
         """Apply behavior-specific effects that may cause failures.
         
         Args:
@@ -215,7 +216,7 @@ class MockAIModel(AIModel):
         
         elif self.behavior == MockModelBehavior.SLOW:
             # Add extra delay for slow behavior
-            time.sleep(2.0)
+            await asyncio.sleep(2.0)
         
         elif self.behavior == MockModelBehavior.FAST:
             # Reduce delay for fast behavior

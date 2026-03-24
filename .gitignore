@@ -166,6 +166,7 @@ cython_debug/
 .vscode/
 
 # AI Council specific
+test_verification.txt
 ai_council_config.yaml
 data/*
 !data/.gitkeep

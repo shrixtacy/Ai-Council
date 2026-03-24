@@ -5,7 +5,7 @@ import re
 from ai_council.core.logger import get_logger
 import asyncio
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..core.interfaces import ExecutionAgent, AIModel, ModelError, FailureResponse, ModelRegistry
 from ..core.models import Subtask, AgentResponse, SelfAssessment, RiskLevel
@@ -100,7 +100,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 self._execution_history[execution_key]["attempts"] = attempt + 1
                 
                 # Apply rate limiting
-                provider = self._get_model_provider(model_id)
+                provider = self._get_model_provider(model)
                 while True:
                     allowed, wait_time = rate_limit_manager.check_rate_limit(provider)
                     if not allowed:
@@ -127,7 +127,7 @@ class BaseExecutionAgent(ExecutionAgent):
                     model_used=model_id,
                     content=response_content,
                     self_assessment=self_assessment,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     success=True,
                     metadata={
                         "attempts": attempt + 1,
@@ -377,7 +377,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 execution_time=execution_time,
                 assumptions=["Subtask skipped due to system overload"]
             ),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             success=False,
             error_message="Subtask skipped due to load shedding",
             metadata={
@@ -406,7 +406,7 @@ class BaseExecutionAgent(ExecutionAgent):
                 model_used=model_id,
                 execution_time=execution_time
             ),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             success=False,
             error_message=f"Failed after {self.max_retries + 1} attempts: {error_message}",
             metadata={
@@ -416,18 +416,28 @@ class BaseExecutionAgent(ExecutionAgent):
             }
         )
     
-    def _get_model_provider(self, model_id: str) -> str:
-        """Get provider name from model ID for rate limiting."""
-        model_id_lower = model_id.lower()
+    def _get_model_provider(self, model: AIModel) -> str:
+        """Get provider name from model metadata for rate limiting.
         
-        if "gpt" in model_id_lower or "openai" in model_id_lower:
-            return "openai"
-        elif "claude" in model_id_lower or "anthropic" in model_id_lower:
-            return "anthropic"
-        elif "gemini" in model_id_lower or "google" in model_id_lower:
-            return "google"
-        else:
-            return "default"
+        Args:
+            model: The AI model instance
+            
+        Returns:
+            str: The provider name in lowercase, or "default"
+        """
+        # Safely extract the provider from the model's metadata
+        if hasattr(model, 'metadata') and isinstance(model.metadata, dict):
+            provider = model.metadata.get("provider")
+            if provider:
+                normalized = str(provider).strip().lower()
+                
+                # Verify the provider is actually configured in the rate limiter
+                configured_limits = getattr(rate_limit_manager, "rate_limits", {})
+                if normalized and normalized in configured_limits:
+                    return normalized
+                    
+        # Fallback if metadata is missing, provider is not specified, or unconfigured
+        return "default"
     
     async def generate_self_assessment(self, response: str, subtask: Subtask, model_id: str) -> SelfAssessment:
         """Generate a self-assessment of the agent's performance.
@@ -464,7 +474,7 @@ class BaseExecutionAgent(ExecutionAgent):
             token_usage=token_usage,
             execution_time=0.0,  # Will be set by execute method
             model_used="",  # Will be set by execute method
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
     
     def handle_model_failure(self, error: ModelError) -> FailureResponse:

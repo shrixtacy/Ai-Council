@@ -1,7 +1,7 @@
 """Core data models and enumerations for AI Council."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional, Dict, Any
 from uuid import uuid4
@@ -69,7 +69,7 @@ class Task:
     intent: Optional[TaskIntent] = None
     complexity: Optional[ComplexityLevel] = None
     execution_mode: ExecutionMode = ExecutionMode.BALANCED
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -86,10 +86,11 @@ class Subtask:
     content: str = ""
     task_type: Optional[TaskType] = None
     priority: Priority = Priority.MEDIUM
+    is_essential: bool = True
     risk_level: RiskLevel = RiskLevel.LOW
     accuracy_requirement: float = 0.8
     estimated_cost: float = 0.0
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -112,7 +113,7 @@ class SelfAssessment:
     token_usage: int = 0
     execution_time: float = 0.0
     model_used: str = ""
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
         """Validate self-assessment data after initialization."""
@@ -133,7 +134,7 @@ class AgentResponse:
     model_used: str = ""
     content: str = ""
     self_assessment: Optional[SelfAssessment] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     success: bool = True
     error_message: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -193,7 +194,7 @@ class FinalResponse:
     execution_metadata: Optional[ExecutionMetadata] = None
     cost_breakdown: Optional[CostBreakdown] = None
     models_used: List[str] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     success: bool = True
     error_message: Optional[str] = None
     error_type: Optional[str] = None
@@ -259,7 +260,7 @@ class PerformanceMetrics:
     average_quality_score: float = 0.0
     total_requests: int = 0
     failed_requests: int = 0
-    last_updated: datetime = field(default_factory=datetime.utcnow)
+    last_updated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
         """Validate performance metrics after initialization."""

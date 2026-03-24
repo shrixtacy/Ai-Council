@@ -4,7 +4,7 @@ import json
 import time
 from ai_council.core.logger import get_logger
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 
 import redis.asyncio as redis
 
@@ -38,12 +38,13 @@ class MQExecutionAgent(ExecutionAgent):
             sanitized_url = parsed_url._replace(netloc=sanitized_netloc).geturl()
             logger.info("MQExecutionAgent initialized with Redis at", extra={"sanitized_url": sanitized_url})
 
-    async def execute(self, subtask: Subtask, model: AIModel) -> AgentResponse:
+    async def execute(self, subtask: Subtask, model: AIModel, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> AgentResponse:
         start_time = time.time()
         
         try:
             model_id = model.get_model_id()
             response_key = f"ai_council:results:{subtask.id}"
+            progress_channel = f"ai_council:progress:{subtask.id}"
             payload = self._serialize_task(subtask, model_id)
             
             self._ensure_connection()
@@ -51,8 +52,38 @@ class MQExecutionAgent(ExecutionAgent):
             logger.info("Pushing subtask to MQ", extra={"subtask_id": subtask.id, "model_id": model_id})
             await self.redis_client.rpush(self.task_queue, json.dumps(payload))
             
+            listener_task = None
+            if progress_callback:
+                async def listen_for_progress():
+                    pubsub = self.redis_client.pubsub()
+                    await pubsub.subscribe(progress_channel)
+                    try:
+                        async for message in pubsub.listen():
+                            if message["type"] == "message":
+                                try:
+                                    data = json.loads(message["data"])
+                                    if asyncio.iscoroutinefunction(progress_callback):
+                                        await progress_callback(data)
+                                    else:
+                                        progress_callback(data)
+                                    # If the progress update signals task completion before blpop, handle it here if needed
+                                except Exception as e:
+                                    logger.warning("Error processing progress message", extra={"error": str(e)})
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logger.warning("Progress listener error", extra={"error": str(e)})
+                    finally:
+                        await pubsub.unsubscribe(progress_channel)
+                        await pubsub.close()
+                
+                listener_task = asyncio.create_task(listen_for_progress())
+            
             logger.debug("Waiting for response on", extra={"response_key": response_key})
             result = await self.redis_client.blpop(response_key, timeout=self.timeout_seconds)
+            
+            if listener_task:
+                listener_task.cancel()
             
             if not result:
                 raise TimeoutError(f"Worker did not respond within {self.timeout_seconds} seconds")
@@ -95,6 +126,7 @@ class MQExecutionAgent(ExecutionAgent):
             "content": subtask.content,
             "task_type": subtask.task_type.value if subtask.task_type else None,
             "priority": subtask.priority.value if subtask.priority else Priority.MEDIUM.value,
+            "is_essential": getattr(subtask, 'is_essential', True),
             "risk_level": subtask.risk_level.value if subtask.risk_level else RiskLevel.LOW.value,
             "accuracy_requirement": subtask.accuracy_requirement,
             "estimated_cost": subtask.estimated_cost,

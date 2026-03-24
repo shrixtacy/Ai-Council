@@ -132,7 +132,7 @@ def sample_model_config() -> ModelConfig:
     return ModelConfig(
         name="test-model",
         provider="test-provider",
-        api_key_env="TEST_API_KEY",
+        api_key_env="DUMMY_API_KEY",
         max_retries=3,
         timeout_seconds=30.0,
         cost_per_input_token=0.00001,
@@ -184,7 +184,7 @@ def sample_config_dict() -> Dict[str, Any]:
             "test-model": {
                 "enabled": True,
                 "provider": "test",
-                "api_key_env": "TEST_API_KEY",
+                "api_key_env": "DUMMY_API_KEY",
                 "capabilities": ["reasoning"],
                 "cost_per_input_token": 0.00001,
                 "cost_per_output_token": 0.00003,
@@ -197,6 +197,11 @@ def sample_config_dict() -> Dict[str, Any]:
 @pytest.fixture
 def temp_config_file(sample_config_dict: Dict[str, Any]) -> Path:
     """Create a temporary configuration file for testing."""
+    import os
+    # Ensure the environment variable for the dummy API key is set
+    # so that AICouncil validation passes
+    os.environ["DUMMY_API_KEY"] = "mock-api-key-for-testing"
+    
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
         yaml.dump(sample_config_dict, f)
         return Path(f.name)

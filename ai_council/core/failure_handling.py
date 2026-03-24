@@ -5,7 +5,7 @@ import time
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Callable, Any, Union, ContextManager
 from uuid import uuid4
@@ -58,7 +58,7 @@ class FailureEvent:
     error_message: str = ""
     subtask_id: Optional[str] = None
     model_id: Optional[str] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     severity: RiskLevel = RiskLevel.LOW
     context: Dict[str, Any] = field(default_factory=dict)
     retry_count: int = 0
@@ -292,7 +292,7 @@ class CircuitBreaker:
         if not last_failure_time:
             return True
         
-        time_since_failure = datetime.utcnow() - last_failure_time
+        time_since_failure = datetime.now(timezone.utc) - last_failure_time
         return time_since_failure.total_seconds() >= self.config.recovery_timeout
     
     def _on_success(self):
@@ -311,7 +311,7 @@ class CircuitBreaker:
         """Handle failed execution."""
         with self.store.lock(self.name):
             self.store.increment_failure_count(self.name)
-            last_dt = datetime.utcnow()
+            last_dt = datetime.now(timezone.utc)
             self.store.set_last_failure_time(self.name, last_dt)
             self.store.add_failure_time(self.name, last_dt)
             
@@ -409,7 +409,7 @@ class RateLimitHandler(FailureHandler):
             # Default exponential backoff for rate limits
             delay = min(60.0, 5.0 * (2 ** failure.retry_count))
         
-        self.rate_limit_windows[model_id] = datetime.utcnow() + timedelta(seconds=delay)
+        self.rate_limit_windows[model_id] = datetime.now(timezone.utc) + timedelta(seconds=delay)
         
         return RecoveryAction(
             action_type="rate_limit_backoff",
@@ -515,7 +515,7 @@ class FailureIsolator:
     
     def isolate_component(self, component: str, reason: str):
         """Isolate a component temporarily."""
-        self.isolated_components[component] = datetime.utcnow()
+        self.isolated_components[component] = datetime.now(timezone.utc)
         logger.warning("Isolated component", extra={"component": component, "reason": reason})
     
     def is_isolated(self, component: str) -> bool:
@@ -524,7 +524,7 @@ class FailureIsolator:
             return False
         
         isolation_time = self.isolated_components[component]
-        if datetime.utcnow() - isolation_time > self.isolation_duration:
+        if datetime.now(timezone.utc) - isolation_time > self.isolation_duration:
             del self.isolated_components[component]
             logger.info("Component isolation expired", extra={"component": component})
             return False
@@ -692,7 +692,7 @@ class ResilienceManager:
         recent_failures = []
         
         # Look at failures in the last hour
-        cutoff_time = datetime.utcnow() - timedelta(hours=1)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=1)
         
         for failure in self.failure_history:
             if failure.timestamp > cutoff_time:
