@@ -123,7 +123,7 @@ class TaskTrackingMiddleware(BaseHTTPMiddleware):
 
 def check_shutdown_status(request: Request):
     """Dependency to reject new requests if the server is shutting down."""
-    if request.app.state.is_shutting_down.is_set():
+    if hasattr(request.app.state, "is_shutting_down") and request.app.state.is_shutting_down.is_set():
         raise HTTPException(status_code=503, detail="Server is currently shutting down. Please try again later.")
 
 
@@ -131,6 +131,8 @@ def check_shutdown_status(request: Request):
 async def lifespan(app: FastAPI):
     """Initialize AI Council on startup."""
     try:
+        app.state.is_shutting_down = asyncio.Event()
+        app.state.task_manager = TaskManager()
         config_path = Path(__file__).parent.parent.parent / "config" / "ai_council.yaml"
         if config_path.exists():
             os.environ["AI_COUNCIL_CONFIG"] = str(config_path)
@@ -154,7 +156,8 @@ async def lifespan(app: FastAPI):
 
     finally:
         print("\n[INFO] Initiating graceful shutdown sequence...")
-        app.state.is_shutting_down.set()
+        if hasattr(app.state, "is_shutting_down"):
+            app.state.is_shutting_down.set()
         
         print("[INFO] Waiting for in-flight tasks to complete...")
         await app.state.task_manager.wait_for_completion(timeout=15.0)
