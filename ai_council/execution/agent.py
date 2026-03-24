@@ -160,12 +160,11 @@ class BaseExecutionAgent(ExecutionAgent):
                     # STEP 1: get routing fallback chain
                     fallback_chain = []
 
-                    if hasattr(subtask, "context") and subtask.context:
-                        if hasattr(subtask.context, "build_fallback_chain"):
-                            try:
-                                fallback_chain = subtask.context.build_fallback_chain()
-                            except Exception as e:
-                                logger.warning(f"Failed to get fallback chain: {e}")
+                    try:
+                        if hasattr(self, "model_context_protocol") and self.model_context_protocol:
+                            fallback_chain = self.model_context_protocol.build_fallback_chain(model_id)
+                    except Exception as e:
+                            logger.warning(f"Failed to get fallback chain: {e}")
 
                     # STEP 2: merge fallback sources
                     fallback_models = []
@@ -218,6 +217,8 @@ class BaseExecutionAgent(ExecutionAgent):
 
                     else:
                         break
+                        
+        return self._create_failure_response(subtask, model_id, str(last_error), start_time)
     
     async def _execute_with_protection(self, subtask: Subtask, model: AIModel) -> str:
         """Execute model call with circuit breaker and timeout protection."""
