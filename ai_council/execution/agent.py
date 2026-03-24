@@ -157,20 +157,8 @@ class BaseExecutionAgent(ExecutionAgent):
                 # ONLY trigger fallback after max retries
                 if attempt >= self.max_retries:
 
-                    # STEP 1: get routing fallback chain
-                    fallback_chain = []
-
-                    try:
-                        if hasattr(self, "model_context_protocol") and self.model_context_protocol:
-                            fallback_chain = self.model_context_protocol.build_fallback_chain(model_id)
-                    except Exception as e:
-                            logger.warning(f"Failed to get fallback chain: {e}")
-
-                    # STEP 2: merge fallback sources
+                    # STEP 1: merge fallback sources (ONLY use resilience)
                     fallback_models = []
-
-                    if fallback_chain:
-                        fallback_models.extend(fallback_chain)
 
                     if recovery_action and recovery_action.metadata and "fallback_models" in recovery_action.metadata:
                         fallback_models.extend(recovery_action.metadata["fallback_models"])
@@ -182,7 +170,7 @@ class BaseExecutionAgent(ExecutionAgent):
                     seen = set()
                     fallback_models = [m for m in fallback_models if not (m in seen or seen.add(m))]
 
-                    # STEP 3: execute fallback chain
+                    # STEP 2: execute fallback chain
                     if fallback_models:
                         logger.info("Iterating over fallback chain", extra={
                             "subtask_id": subtask.id,
@@ -215,8 +203,8 @@ class BaseExecutionAgent(ExecutionAgent):
                     elif recovery_action and recovery_action.skip_subtask:
                         return self._create_skip_response(subtask, model_id, start_time)
 
-                    else:
-                        break
+                else:
+                    break
                         
         return self._create_failure_response(subtask, model_id, str(last_error), start_time)
     
