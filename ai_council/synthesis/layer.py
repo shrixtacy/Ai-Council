@@ -7,6 +7,29 @@ from datetime import datetime
 from ..core.interfaces import SynthesisLayer, ExecutionMetadata
 from ..core.models import AgentResponse, FinalResponse, CostBreakdown
 
+CODE_BLOCK_PATTERN = re.compile(r"```.*?```", re.DOTALL)
+
+
+def protect_code_blocks(text):
+    code_blocks = []
+
+    def replacer(match):
+        code_blocks.append(match.group(0))
+        return f"__CODE_BLOCK_{len(code_blocks)-1}__"
+
+    return CODE_BLOCK_PATTERN.sub(replacer, text), code_blocks
+
+
+def restore_code_blocks(text, code_blocks):
+    for i, block in enumerate(code_blocks):
+        text = text.replace(f"__CODE_BLOCK_{i}__", block)
+    return text
+
+
+def safe_truncate(text, limit=5000):
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit("\n", 1)[0]
 
 class SynthesisLayerImpl(SynthesisLayer):
     """Implementation of the SynthesisLayer for producing final coherent responses."""
@@ -87,45 +110,25 @@ class SynthesisLayerImpl(SynthesisLayer):
             )
     
     async def normalize_output(self, content: str) -> str:
-        """Normalize output content for consistency in tone and structure.
-        
-        This method standardizes formatting, removes excessive whitespace,
-        and ensures consistent tone throughout the response.
-        
-        Args:
-            content: Raw content to normalize
-            
-        Returns:
-            str: Normalized content with consistent formatting and tone
-        """
+        """Safe normalization that preserves code blocks and formatting."""
         if not content:
             return ""
-        
-        # Remove excessive whitespace and normalize line breaks
-        normalized = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
-        normalized = re.sub(r'[ \t]+', ' ', normalized)
+
+        # Protect code blocks
+        protected_text, code_blocks = protect_code_blocks(content)
+
+        # Normalize only excessive blank lines
+        normalized = re.sub(r'\n\s*\n\s*\n+', '\n\n', protected_text)
+
+        # Strip outer whitespace only
         normalized = normalized.strip()
-        
-        # Ensure sentences end with proper punctuation
-        sentences = normalized.split('. ')
-        normalized_sentences = []
-        
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if sentence and not sentence.endswith(('.', '!', '?', ':')):
-                sentence += '.'
-            if sentence:
-                normalized_sentences.append(sentence)
-        
-        normalized = '. '.join(normalized_sentences)
-        
-        # Remove redundant phrases and normalize tone
-        normalized = self._normalize_tone(normalized)
-        
-        # Truncate if too long
-        if len(normalized) > self._max_response_length:
-            normalized = normalized[:self._max_response_length - 3] + "..."
-        
+
+        # Restore code blocks
+        normalized = restore_code_blocks(normalized, code_blocks)
+
+        # Safe truncation
+        normalized = safe_truncate(normalized, self._max_response_length)
+
         return normalized
     
     async def attach_metadata(self, response: FinalResponse, metadata: ExecutionMetadata) -> FinalResponse:
@@ -222,7 +225,7 @@ class SynthesisLayerImpl(SynthesisLayer):
         for content in sorted_contents[1:]:
             unique_info = self._extract_unique_information(content, synthesized)
             if unique_info:
-                synthesized += f"\n\nAdditionally, {unique_info}"
+                synthesized += f"\n\n{unique_info}"
         
         return synthesized
     
@@ -237,8 +240,8 @@ class SynthesisLayerImpl(SynthesisLayer):
             str: Unique information, if any
         """
         # Simple implementation: look for sentences in new_content not in existing_content
-        new_sentences = [s.strip() for s in new_content.split('.') if s.strip()]
-        existing_sentences = [s.strip() for s in existing_content.split('.') if s.strip()]
+        new_sentences = re.split(r'(?<=[.!?]) +', new_content)
+        existing_sentences = re.split(r'(?<=[.!?]) +', existing_content)    
         
         unique_sentences = []
         for sentence in new_sentences:
