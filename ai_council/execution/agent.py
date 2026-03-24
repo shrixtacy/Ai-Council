@@ -142,80 +142,82 @@ class BaseExecutionAgent(ExecutionAgent):
                 
             except Exception as e:
                 last_error = e
-                
+
                 # Create failure event
                 failure_event = self._create_failure_event(e, subtask, model_id, attempt)
-                
-                # Get recovery action from resilience manager
+
+                # Get recovery action
                 recovery_action = resilience_manager.handle_failure(failure_event)
-                
+
                 logger.warning(
                     f"Attempt {attempt + 1} failed for subtask {subtask.id} "
-                    f"with model {model_id}: {str(e)} - Recovery: {recovery_action.action_type}"
+                    f"with model {model_id}: {str(e)} - Recovery: {recovery_action.action_type if recovery_action else 'None'}"
                 )
-                
-                # Handle recovery action
-                if not recovery_action.should_retry or attempt >= self.max_retries:
+
+                # ONLY trigger fallback after max retries
+                if attempt >= self.max_retries:
+
+                    # STEP 1: get routing fallback chain
+                    fallback_chain = []
+
+                    if hasattr(subtask, "context") and subtask.context:
+                        if hasattr(subtask.context, "build_fallback_chain"):
+                            try:
+                                fallback_chain = subtask.context.build_fallback_chain()
+                            except Exception as e:
+                                logger.warning(f"Failed to get fallback chain: {e}")
+
+                    # STEP 2: merge fallback sources
                     fallback_models = []
-                    if recovery_action.metadata and "fallback_models" in recovery_action.metadata:
-                        fallback_models = recovery_action.metadata["fallback_models"]
-                    elif recovery_action.fallback_model:
-                        fallback_models = [recovery_action.fallback_model]
-                        
+
+                    if fallback_chain:
+                        fallback_models.extend(fallback_chain)
+
+                    if recovery_action and recovery_action.metadata and "fallback_models" in recovery_action.metadata:
+                        fallback_models.extend(recovery_action.metadata["fallback_models"])
+
+                    if recovery_action and recovery_action.fallback_model:
+                        fallback_models.insert(0, recovery_action.fallback_model)
+
+                    # remove duplicates
+                    seen = set()
+                    fallback_models = [m for m in fallback_models if not (m in seen or seen.add(m))]
+
+                    # STEP 3: execute fallback chain
                     if fallback_models:
                         logger.info("Iterating over fallback chain", extra={
-                            "subtask_id": subtask.id, 
+                            "subtask_id": subtask.id,
                             "original_model": model_id,
                             "fallback_chain": fallback_models
                         })
+
                         fallback_errors = []
+
                         for fallback_model_id in fallback_models:
-                            # Try fallback model
                             response = await self._execute_with_fallback(
                                 subtask, fallback_model_id, start_time, depth
                             )
+
                             if response.success:
-                                # Log transition
-                                logger.info("Fallback execution successful", extra={
-                                    "subtask_id": subtask.id,
-                                    "original_model": model_id,
-                                    "successful_fallback": fallback_model_id
-                                })
-                                # Attach fallback metadata
-                                if response.metadata is None:
-                                    response.metadata = {}
-                                response.metadata["fallback_attempts"] = response.metadata.get("fallback_attempts", 0) + 1
-                                response.metadata["fallback_failures"] = fallback_errors
                                 return response
-                            
-                            # Collect error and try the next one
+
                             fallback_errors.append({
                                 "model_id": fallback_model_id,
                                 "error": response.error_message
                             })
-                            logger.warning(f"Fallback model {fallback_model_id} failed: {response.error_message}")
-                            
-                        # If all fallbacks failed
+
                         return self._create_failure_response(
-                            subtask, model_id, f"All fallback models failed. Last error: {fallback_errors[-1]['error'] if fallback_errors else str(last_error)}", start_time
+                            subtask,
+                            model_id,
+                            f"All fallback models failed. Last error: {fallback_errors[-1]['error'] if fallback_errors else str(last_error)}",
+                            start_time
                         )
-                    elif recovery_action.skip_subtask:
-                        # Skip this subtask
+
+                    elif recovery_action and recovery_action.skip_subtask:
                         return self._create_skip_response(subtask, model_id, start_time)
+
                     else:
-                        # No more retries or recovery options
                         break
-                
-                # Apply retry delay with jitter
-                if attempt < self.max_retries and recovery_action.retry_delay > 0:
-                    import random
-                    jitter = random.uniform(0.8, 1.2)  # ±20% jitter
-                    delay = recovery_action.retry_delay * jitter
-                    logger.info("Waiting", extra={"delay_seconds": round(delay, 1)})
-                    await asyncio.sleep(delay)
-        
-        # All attempts failed, return failure response
-        return self._create_failure_response(subtask, model_id, str(last_error), start_time)
     
     async def _execute_with_protection(self, subtask: Subtask, model: AIModel) -> str:
         """Execute model call with circuit breaker and timeout protection."""
