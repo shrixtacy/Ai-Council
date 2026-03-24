@@ -1,5 +1,9 @@
 """Implementation of the ArbitrationLayer for conflict resolution between agent responses."""
 
+from http.client import responses
+from difflib import SequenceMatcher
+
+
 from ai_council.core.logger import get_logger
 from typing import List, Dict, Set, Optional
 from datetime import datetime
@@ -9,6 +13,21 @@ from ..core.models import AgentResponse, RiskLevel
 
 
 logger = get_logger(__name__)
+class ArbitrationExplanation:
+    def __init__(self, models_used, conflicts, decisions):
+        self.models_used = models_used
+        self.conflicts = conflicts
+        self.decisions = decisions
+        self.timestamp = datetime.now()
+
+    def to_dict(self):
+        return {
+            "models_used": self.models_used,
+            "conflicts": self.conflicts,
+            "decisions": self.decisions,
+            "timestamp": str(self.timestamp),
+            "extra": getattr(self, "extra", None)
+        }
 
 
 class ConcreteArbitrationLayer(ArbitrationLayer):
@@ -35,7 +54,16 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         self.quality_weight = quality_weight
         logger.info("ArbitrationLayer initialized", extra={"confidence_threshold": confidence_threshold, "quality_weight": quality_weight})
     
+    def _calculate_similarity(self, responses):
+        scores = []
+        for i in range(len(responses)):
+            for j in range(i + 1, len(responses)):
+                s = SequenceMatcher(None, responses[i].content, responses[j].content).ratio()
+                scores.append(s)
+        return sum(scores) / len(scores) if scores else 1.0
+
     async def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
+        print("DEBUG: Responses received:", responses) 
         """
         Arbitrate between multiple agent responses to resolve conflicts.
         
@@ -61,26 +89,104 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         
         logger.info("Starting arbitration for", extra={"count": len(responses)})
         
+        # ✅ Capture models used for explainability
+        models_used = [r.model_used for r in responses]
+        # ✅ Remove duplicates
+        models_used = list(set(models_used))
+
+        # ✅ Confidence scores per model
+        confidence_scores = [
+            {
+                "model": r.model_used,
+                "confidence": r.self_assessment.confidence_score if r.self_assessment else 0.5
+            }
+            for r in responses
+        ]
+
+        # ✅ Similarity score
+        similarity_score = self._calculate_similarity(responses)
+
+        
         # Step 1: Detect conflicts between responses
         conflicts = await self.detect_conflicts(responses)
+        conflict_detected = len(conflicts) > 0
+
         logger.info("Detected", extra={"count": len(conflicts)})
-        
+        # ✅ Prepare conflict info for explainability
+        conflict_info = [
+            {
+                "type": c.conflict_type,
+                "description": c.description,
+                "responses": c.response_ids
+            }
+            for c in conflicts
+        ]
+
+
         # Step 2: Resolve each conflict
         resolutions = []
+        decisions = []
+
         for conflict in conflicts:
             try:
-                resolution = await self.resolve_contradiction(conflict)
+                resolution = await self.resolve_contradiction(conflict, responses=responses)
                 resolutions.append(resolution)
+
+            # ✅ Track decision details for explainability
+                decisions.append({
+                    "conflict_type": conflict.conflict_type,
+                    "chosen_response": resolution.chosen_response_id,
+                    "reason": resolution.reasoning,
+                    "confidence": resolution.confidence
+                })
+
                 logger.info("Resolved conflict", extra={"conflict_type": conflict.conflict_type})
             except Exception as e:
-                logger.error("Failed to resolve conflict", extra={"conflict_type": conflict.conflict_type, "error": str(e)})
+                logger.error(
+                    "Failed to resolve conflict", 
+                    extra={"conflict_type": conflict.conflict_type, "error": str(e)}
+                )
+                
         
         # Step 3: Build validated response list based on resolutions
         validated_responses = self._build_validated_responses(responses, conflicts, resolutions)
+
+        selected_response = validated_responses[0] if validated_responses else None
+        selected_model = selected_response.model_used if selected_response else None
+
+
+        extra_explanation = None
+        if selected_response:
+            extra_explanation = self.build_explanation(responses, selected_response)
+
         
-        logger.info("Arbitration complete", extra={"validated_responses": len(validated_responses), "resolutions": len(resolutions)})
-        return ArbitrationResult(validated_responses=validated_responses, conflicts_resolved=resolutions)
+        logger.info(
+            "Arbitration complete", 
+            extra={"validated_responses": len(validated_responses), "resolutions": len(resolutions)}
+        )
     
+        # ✅ Create explanation object
+        explanation = ArbitrationExplanation(
+            models_used=models_used,
+            conflicts=conflict_info,
+            decisions=decisions
+        )
+
+        # 🔥 ADD THESE NEW FIELDS
+        explanation.similarity_score = round(similarity_score, 3)
+        explanation.conflict_detected = conflict_detected
+        explanation.confidence_scores = confidence_scores
+        explanation.selected_model = selected_model
+
+        explanation.extra = extra_explanation
+    
+        # ✅ Return ArbitrationResult with explanation
+        return ArbitrationResult(
+            validated_responses=validated_responses,
+            conflicts_resolved=resolutions,
+            explanation=explanation
+        )
+
     async def detect_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
         """
         Detect conflicts between multiple agent responses.
@@ -107,22 +213,23 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         
         return conflicts
     
-    async def resolve_contradiction(self, conflict: Conflict) -> Resolution:
+    async def resolve_contradiction(self, conflict: Conflict, responses: Optional[List[AgentResponse]] = None) -> Resolution:
         """
         Resolve a specific contradiction between responses.
         
         Args:
             conflict: The conflict to resolve
+            responses: Optional list of responses used to evaluate conflict
             
         Returns:
             Resolution: The resolution decision
         """
         if conflict.conflict_type == "content_contradiction":
-            return await self._resolve_content_contradiction(conflict)
+            return await self._resolve_content_contradiction(conflict, responses)
         elif conflict.conflict_type == "confidence_conflict":
-            return await self._resolve_confidence_conflict(conflict)
+            return await self._resolve_confidence_conflict(conflict, responses)
         elif conflict.conflict_type == "quality_conflict":
-            return await self._resolve_quality_conflict(conflict)
+            return await self._resolve_quality_conflict(conflict, responses)
         else:
             # Default resolution: choose first response with warning
             logger.warning("Unknown conflict type", extra={"conflict_type": conflict.conflict_type})
@@ -145,40 +252,42 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         """Detect contradictions in response content."""
         conflicts = []
         
-        # Simple heuristic: if responses have very different lengths or key terms, flag as contradiction
-        contents = [r.content.lower().strip() for r in responses if r.success]
-        if len(contents) < 2:
+        valid_responses = [r for r in responses if r.success]
+        if len(valid_responses) < 2:
             return conflicts
+            
+        try:
+            from sentence_transformers import SentenceTransformer, util
+        except ImportError:
+            logger.error("sentence_transformers not installed for content contradiction detection.")
+            return conflicts
+            
+        if getattr(self, '_encoder', None) is None:
+            self._encoder = SentenceTransformer('all-MiniLM-L6-v2')
+            
+        contents = [str(r.content).strip() for r in valid_responses]
+        response_ids = [r.subtask_id + "_" + r.model_used for r in valid_responses]
         
-        # Check for significant length differences (potential indicator of contradiction)
-        lengths = [len(content) for content in contents]
-        max_length = max(lengths)
-        min_length = min(lengths)
+        embeddings = self._encoder.encode(contents, convert_to_tensor=True)
+        sim_matrix = util.cos_sim(embeddings, embeddings)
         
-        if max_length > 0 and (max_length - min_length) / max_length > 0.7:
-            # Significant length difference detected
-            response_ids = [r.subtask_id + "_" + r.model_used for r in responses if r.success]
+        conflict_detected = False
+        min_sim = 1.0
+        
+        for i in range(len(valid_responses)):
+            for j in range(i + 1, len(valid_responses)):
+                sim = sim_matrix[i][j].item()
+                min_sim = min(min_sim, sim)
+                if sim < 0.8:
+                    conflict_detected = True
+                    
+        if conflict_detected:
             conflicts.append(Conflict(
                 response_ids=response_ids,
                 conflict_type="content_contradiction",
-                description=f"Significant content length variation detected (min: {min_length}, max: {max_length})"
+                description=f"Semantic contradiction detected (min similarity: {min_sim:.2f})"
             ))
-        
-        # Check for contradictory keywords (simple heuristic)
-        positive_indicators = ["yes", "true", "correct", "valid", "success"]
-        negative_indicators = ["no", "false", "incorrect", "invalid", "fail", "error"]
-        
-        has_positive = any(any(indicator in content for indicator in positive_indicators) for content in contents)
-        has_negative = any(any(indicator in content for indicator in negative_indicators) for content in contents)
-        
-        if has_positive and has_negative:
-            response_ids = [r.subtask_id + "_" + r.model_used for r in responses if r.success]
-            conflicts.append(Conflict(
-                response_ids=response_ids,
-                conflict_type="content_contradiction",
-                description="Contradictory sentiment detected in responses (positive vs negative indicators)"
-            ))
-        
+            
         return conflicts
     
     def _detect_confidence_conflicts(self, responses: List[AgentResponse]) -> List[Conflict]:
@@ -243,33 +352,75 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         
         return conflicts
     
-    async def _resolve_content_contradiction(self, conflict: Conflict) -> Resolution:
+    async def _resolve_content_contradiction(self, conflict: Conflict, responses: Optional[List[AgentResponse]] = None) -> Resolution:
         """Resolve content contradictions by choosing the most reliable response."""
-        # For content contradictions, prioritize responses with higher confidence and better quality
-        # This is a simplified resolution - in practice, might involve more sophisticated analysis
-        
-        reasoning = f"Resolved content contradiction by selecting response with highest composite score"
+        if not responses:
+            return Resolution(
+                chosen_response_id=conflict.response_ids[0],
+                reasoning="Resolved content contradiction by default (no responses context)",
+                confidence=0.7
+            )
+            
+        conflict_responses = [r for r in responses if r.subtask_id + "_" + r.model_used in conflict.response_ids]
+        if not conflict_responses:
+            return Resolution(
+                chosen_response_id=conflict.response_ids[0],
+                reasoning="Resolved content contradiction by default (responses not found)",
+                confidence=0.7
+            )
+            
+        best_resp = max(conflict_responses, key=lambda r: self._calculate_quality_score(r))
         return Resolution(
-            chosen_response_id=conflict.response_ids[0],  # Simplified: choose first
-            reasoning=reasoning,
+            chosen_response_id=best_resp.subtask_id + "_" + best_resp.model_used,
+            reasoning="Resolved content contradiction by selecting response with highest composite score",
             confidence=0.7
         )
     
-    async def _resolve_confidence_conflict(self, conflict: Conflict) -> Resolution:
+    async def _resolve_confidence_conflict(self, conflict: Conflict, responses: Optional[List[AgentResponse]] = None) -> Resolution:
         """Resolve confidence conflicts by choosing the most confident response."""
-        reasoning = f"Resolved confidence conflict by selecting response with highest confidence score"
+        if not responses:
+            return Resolution(
+                chosen_response_id=conflict.response_ids[0],
+                reasoning="Resolved confidence conflict by default (no responses context)",
+                confidence=0.8
+            )
+            
+        conflict_responses = [r for r in responses if r.subtask_id + "_" + r.model_used in conflict.response_ids]
+        if not conflict_responses:
+            return Resolution(
+                chosen_response_id=conflict.response_ids[0],
+                reasoning="Resolved confidence conflict by default (responses not found)",
+                confidence=0.8
+            )
+            
+        best_resp = max(conflict_responses, key=lambda r: r.self_assessment.confidence_score if getattr(r, 'self_assessment', None) and getattr(r.self_assessment, 'confidence_score', None) is not None else 0.0)
         return Resolution(
-            chosen_response_id=conflict.response_ids[0],  # Simplified: choose first
-            reasoning=reasoning,
+            chosen_response_id=best_resp.subtask_id + "_" + best_resp.model_used,
+            reasoning="Resolved confidence conflict by selecting response with highest confidence score",
             confidence=0.8
         )
     
-    async def _resolve_quality_conflict(self, conflict: Conflict) -> Resolution:
+    async def _resolve_quality_conflict(self, conflict: Conflict, responses: Optional[List[AgentResponse]] = None) -> Resolution:
         """Resolve quality conflicts by choosing the highest quality response."""
-        reasoning = f"Resolved quality conflict by selecting response with highest quality score"
+        if not responses:
+            return Resolution(
+                chosen_response_id=conflict.response_ids[0],
+                reasoning="Resolved quality conflict by default (no responses context)",
+                confidence=0.75
+            )
+            
+        conflict_responses = [r for r in responses if r.subtask_id + "_" + r.model_used in conflict.response_ids]
+        if not conflict_responses:
+            return Resolution(
+                chosen_response_id=conflict.response_ids[0],
+                reasoning="Resolved quality conflict by default (responses not found)",
+                confidence=0.75
+            )
+            
+        best_resp = max(conflict_responses, key=lambda r: self._calculate_quality_score(r))
         return Resolution(
-            chosen_response_id=conflict.response_ids[0],  # Simplified: choose first
-            reasoning=reasoning,
+            chosen_response_id=best_resp.subtask_id + "_" + best_resp.model_used,
+            reasoning="Resolved quality conflict by selecting response with highest quality score",
             confidence=0.75
         )
     
@@ -352,6 +503,53 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
                     validated.append(response)
         
         return validated
+    
+    def build_explanation(self, responses, selected_response):
+        models_compared = []
+
+        for resp in responses:
+            models_compared.append({
+                "model": resp.model_used,
+                "confidence": (
+                    resp.self_assessment.confidence_score
+                    if resp.self_assessment else 0.5
+                ),
+                "content": resp.content[:100]
+            })
+        
+        similarity = None
+
+        if len(responses) >= 2:
+            similarity = self.simple_similarity(
+            responses[0].content,
+            responses[1].content
+        )
+
+        explanation = {
+            "selected_model": selected_response.model_used,
+            "reason": "Highest confidence score",
+            "models_compared": models_compared,
+            "similarity_score": similarity,
+            "conflict_detected": True if len(responses) > 1 else False
+
+        }
+
+        return explanation
+    
+
+    def simple_similarity(self, text1, text2):
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+
+        common = words1.intersection(words2)
+        total = words1.union(words2)
+
+        if not total:
+            return 0
+
+        return len(common) / len(total)
+
+
 
 
 class NoOpArbitrationLayer(ArbitrationLayer):
@@ -395,12 +593,13 @@ class NoOpArbitrationLayer(ArbitrationLayer):
         """
         return []
     
-    async def resolve_contradiction(self, conflict: Conflict) -> Resolution:
+    async def resolve_contradiction(self, conflict: Conflict, responses: Optional[List[AgentResponse]] = None) -> Resolution:
         """
         Return default resolution - should not be called in no-op mode.
         
         Args:
             conflict: The conflict to resolve
+            responses: Optional list of responses used to evaluate conflict
             
         Returns:
             Default resolution choosing first response

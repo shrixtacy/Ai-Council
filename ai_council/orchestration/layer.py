@@ -1,5 +1,8 @@
 """Implementation of the OrchestrationLayer for main request processing pipeline."""
 
+from http.client import responses
+from difflib import SequenceMatcher
+
 from ai_council.core.logger import get_logger
 import asyncio
 import time
@@ -95,7 +98,6 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         self.partial_failure_threshold = 0.5  # 50% success rate minimum
         
         logger.info("OrchestrationLayer initialized with comprehensive failure handling")
-    
     def _initialize_circuit_breakers(self):
         """Initialize circuit breakers for different components."""
         # Analysis engine circuit breaker
@@ -212,6 +214,8 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         self, 
         subtasks: List[Subtask], 
         execution_plan, 
+        execution_mode: ExecutionMode   
+    ):
         execution_mode: ExecutionMode,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> List[AgentResponse]:
@@ -276,29 +280,63 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         
         return "continue"
     
-    async def _stage_arbitrate(
-        self, 
-        responses: List[AgentResponse]
-    ) -> List[AgentResponse]:
-        """
-        Stage 6: Arbitrate between multiple responses.
-        
-        Args:
-            responses: List of agent responses to arbitrate
-            
-        Returns:
-            List[AgentResponse]: Validated responses after arbitration
-        """
+    async def _stage_arbitrate(self, responses: List[AgentResponse]):
+
         if len(responses) <= 1:
-            return responses
-        
+            return responses, {
+                "selected_model": responses[0].model_used if responses else None,
+                "confidence": responses[0].self_assessment.confidence_score if responses and responses[0].self_assessment else 0.5,
+                "reason": "Only one model response available",
+                "participating_models": [r.model_used for r in responses],
+                "similarity_score": 1.0,
+                "conflict_detected": False
+            }
+
         try:
-            arbitration_result = await self._arbitrate_with_protection(responses)
-            return arbitration_result.validated_responses
+            # ✅ 1. Collect model data
+            model_data = []
+            for r in responses:
+                confidence = r.self_assessment.confidence_score if r.self_assessment else 0.5
+                model_data.append({
+                    "model": r.model_used,
+                    "confidence": confidence,
+                    "content": r.content
+                })
+
+            # ✅ 2. Select best model (highest confidence)
+            best = max(model_data, key=lambda x: x["confidence"])
+
+            # ✅ 3. SIMPLE similarity (text match ratio)
+            contents = [m["content"] for m in model_data]
+            similarity_score = sum(
+                1 for c in contents if c == contents[0]
+            ) / len(contents)
+
+            # ✅ 4. Conflict detection
+            conflict_detected = similarity_score < 0.7
+
+            # ✅ 5. Build explanation
+            explanation = {
+                "selected_model": best["model"],
+                "confidence": best["confidence"],
+                "reason": "Selected highest confidence response",
+                "participating_models": model_data,
+                "similarity_score": round(similarity_score, 2),
+                "conflict_detected": conflict_detected
+            }
+
+            # ✅ 6. Save arbitration decision
+            arbitration_decision = f"Selected {best['model']} with confidence {best['confidence']}"
+
+            # Return best response object
+            best_response_obj = next(r for r in responses if r.model_used == best["model"])
+
+            return [best_response_obj], explanation, [arbitration_decision]
+
         except Exception as e:
             logger.warning("Arbitration failed", extra={"error": str(e)})
-            # Fallback: use first successful response
-            return responses[:1]
+            return [responses[0]], None, []
+
     
     async def _stage_synthesize(
         self, 
@@ -379,6 +417,9 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         """
         start_time = time.time()
         execution_metadata = ExecutionMetadata()
+
+        final_response= None
+        explanation= None
         
         try:
             logger.info("Processing request", extra={"mode": execution_mode.value, "input_sample": user_input[:100]})
@@ -432,18 +473,29 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 )
             
             # Stage 6: Arbitration
-            validated_responses = await self._stage_arbitrate(successful_responses)
+            try:
+                validated_responses, explanation,arbitration_decisions = await self._stage_arbitrate(successful_responses)
+
+            except Exception as e:
+                logger.warning("Arbitration unpacking failed", extra={"error": str(e)})
+                validated_responses = successful_responses[:1]
+                explanation = None
+            
             execution_metadata.execution_path.append("arbitration")
             
             # Stage 7: Synthesis
             final_response = await self._stage_synthesize(validated_responses)
+            final_response.explanation = explanation
+            final_response.arbitration_decisions = arbitration_decisions
             execution_metadata.execution_path.append("synthesis")
             
             # Stage 8: Attach Metadata
             execution_metadata.total_execution_time = time.time() - start_time
             final_response = await self._stage_attach_metadata(final_response, execution_metadata)
             
-            logger.info("Request processed successfully", extra={"execution_time": round(execution_metadata.total_execution_time, 2)})
+            logger.info("Request processed successfully", 
+                extra={"execution_time": round(execution_metadata.total_execution_time, 2)}
+            )
             return final_response
             
         except TimeoutError as e:
@@ -459,18 +511,18 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             execution_time = time.time() - start_time
             
             # Record system failure
-            failure_event = create_failure_event(
-                failure_type=FailureType.SYSTEM_OVERLOAD,
-                component="orchestration_layer",
-                error_message=str(e),
-                context={"execution_time": execution_time}
-            )
-            resilience_manager.handle_failure(failure_event)
+        failure_event = create_failure_event(
+            failure_type=FailureType.SYSTEM_OVERLOAD,
+            component="orchestration_layer",
+            error_message=str(e),
+            context={"execution_time": execution_time}
+        )
+        resilience_manager.handle_failure(failure_event)
             
-            return create_error_response(
-                e,
-                context={'component': 'orchestration_layer.process_request'}
-            )
+        return create_error_response(
+            e,
+            context={'component': 'orchestration_layer.process_request'}
+        )
     
     # =========================================================================
     # PROTECTED METHODS - With circuit breaker protection
@@ -636,7 +688,10 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                         break
             
             # Check group success rate
-            group_success_rate = sum(1 for resp in group_responses if resp.success) / len(group_responses)
+            if group_responses:
+                group_success_rate = sum(1 for resp in group_responses if resp.success) / len(group_responses)
+            else:
+                group_success_rate = 0.0
             if group_success_rate < 0.5:
                 failed_groups += 1
                 logger.warning("Group had low success rate", extra={"group_index": group_index, "success_rate": group_success_rate})
@@ -657,9 +712,18 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         """Execute a group of subtasks with resilience mechanisms."""
         coros = [self._execute_single_subtask(subtask, execution_mode, progress_callback) for subtask in subtasks]
         responses = await asyncio.gather(*coros)
-        
-        return list(responses)
+
+    # 🔥 FLATTEN RESPONSES
+        final_responses = []
+        for r in responses:
+            if isinstance(r, list):
+                final_responses.extend(r)
+            else:
+                final_responses.append(r)
+
+        return final_responses
     
+
     async def _execute_single_subtask(
         self, 
         subtask: Subtask, 
@@ -668,18 +732,19 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     ) -> AgentResponse:
         """Execute a single subtask with full error handling."""
         try:
-            # Check system health before execution
-            health = resilience_manager.health_check()
-            if health["overall_health"] == "degraded" and execution_mode == ExecutionMode.FAST:
-                if subtask.priority.value in ["low", "medium"]:
-                    logger.info("Skipping subtask", extra={"id": subtask.id})
-                    return AgentResponse(
-                        subtask_id=subtask.id,
-                        model_used="skipped",
-                        content="",
-                        success=False,
-                        error_message="Skipped due to system degradation",
-                        metadata={"skipped": True, "reason": "system_degraded"}
+        
+
+            for model in models:
+                try:
+                    response = await timeout_handler.execute_with_timeout(
+                        self.execution_agent.execute,
+                        adaptive_timeout_manager.get_adaptive_timeout("subtask_execution"),
+                        "subtask_execution",
+                        "orchestration_layer",
+                        subtask.id,
+                        model.get_model_id(),
+                        subtask,
+                        model
                     )
             
             # Get available models
@@ -711,16 +776,17 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 (m for m in models if m.get_model_id() == optimization.recommended_model),
                 None
             )
-            
-            if not selected_model:
-                logger.error("Optimized model", extra={"recommended_model": optimization.recommended_model})
-                return AgentResponse(
+
+            return [
+                AgentResponse(
                     subtask_id=subtask.id,
-                    model_used=optimization.recommended_model,
+                    model_used="error",
                     content="",
                     success=False,
-                    error_message=f"Selected model {optimization.recommended_model} not available"
+                    error_message=str(e)
                 )
+            ]
+
             
             # Execute subtask with timeout protection
             response = await timeout_handler.execute_with_timeout(

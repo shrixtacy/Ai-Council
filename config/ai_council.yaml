@@ -7,6 +7,7 @@ execution:
   default_timeout_seconds: 60.0
   enable_arbitration: true  # Arbitration enabled for conflict resolution
   enable_synthesis: true
+ 
   use_mq: true
   redis_url: "redis://localhost:6379"
   strategy_timeouts:
@@ -31,7 +32,7 @@ logging:
 models:
   # xAI Grok - ENABLED
   grok-beta:
-    enabled: true
+    enabled: false
     provider: xai
     api_key_env: XAI_API_KEY
     capabilities:
@@ -47,6 +48,22 @@ models:
 
   # Google Gemini 1.5 Flash - ENABLED (Working!)
   gemini-1.5-flash:
+    enabled: true
+    provider: google
+    api_key_env: GOOGLE_API_KEY
+    capabilities:
+      - reasoning
+      - research
+      - creative_output
+      - code_generation
+      - debugging
+    cost_per_input_token: 0.00000125
+    cost_per_output_token: 0.00000375
+    max_context_length: 1048576
+    timeout_seconds: 45.0
+
+  # Google Gemini 1.5 Flash - ENABLED (Working!)
+  gemini-1.5-flash-2:
     enabled: true
     provider: google
     api_key_env: GOOGLE_API_KEY

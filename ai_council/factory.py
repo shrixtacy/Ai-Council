@@ -395,7 +395,7 @@ class AICouncilFactory:
     def _create_execution_agent(self) -> ExecutionAgent:
         """Create the execution agent."""
         self.logger.info("Creating execution agent")
-        if self.config.execution.use_mq:
+        if hasattr(self.config.execution, "use_mq") and self.config.execution.use_mq:
             from .execution.mq_agent import MQExecutionAgent
             import math
             from urllib.parse import urlparse

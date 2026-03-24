@@ -306,6 +306,10 @@ def serialize_response(response) -> Dict[str, Any]:
         "error_message": getattr(response, "error_message", None)
         if not getattr(response, "success", False)
         else None,
+
+        "explanation": response.explanation.to_dict()
+        if hasattr(response, "explanation") and response.explanation
+        else None,
     }
 
 

@@ -198,6 +198,9 @@ class FinalResponse:
     success: bool = True
     error_message: Optional[str] = None
     error_type: Optional[str] = None
+    explanation: Optional[Dict[str, Any]] = None
+    arbitration_decisions: Optional[List[str]] = None
+
 
     def __post_init__(self) -> None:
         """Validate final response data after initialization."""

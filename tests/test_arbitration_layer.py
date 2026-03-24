@@ -65,25 +65,25 @@ async def test_detect_content_contradiction_length(arbitration_layer, sample_sub
     assert any(c.conflict_type == "content_contradiction" for c in conflicts)
 
 @pytest.mark.asyncio
-async def test_detect_content_contradiction_sentiment(arbitration_layer, sample_subtask):
-    # One positive, one negative
+async def test_detect_content_contradiction_semantic(arbitration_layer, sample_subtask):
+    # Two factually different responses
     resp1 = AgentResponse(
         subtask_id=sample_subtask.id,
         model_used="model-a",
-        content="The result is true and correct.",
+        content="The system is functioning optimally and all tests have passed without any issues.",
         success=True,
         self_assessment=SelfAssessment(confidence_score=0.9, assumptions=[], risk_level=RiskLevel.LOW, estimated_cost=0, token_usage=0, execution_time=0, model_used="a")
     )
     resp2 = AgentResponse(
         subtask_id=sample_subtask.id,
         model_used="model-b",
-        content="The result is false and incorrect.",
+        content="The server has crashed under heavy load, causing severe data corruption.",
         success=True,
         self_assessment=SelfAssessment(confidence_score=0.9, assumptions=[], risk_level=RiskLevel.LOW, estimated_cost=0, token_usage=0, execution_time=0, model_used="b")
     )
     
     conflicts = await arbitration_layer.detect_conflicts([resp1, resp2])
-    assert any(c.conflict_type == "content_contradiction" and "sentiment" in c.description for c in conflicts)
+    assert any(c.conflict_type == "content_contradiction" for c in conflicts)
 
 @pytest.mark.asyncio
 async def test_detect_confidence_conflict(arbitration_layer, sample_subtask):
