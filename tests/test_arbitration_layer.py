@@ -159,6 +159,101 @@ async def test_resolve_contradiction_types(arbitration_layer):
     assert res4.chosen_response_id == "a"
     assert "Unknown" in res4.reasoning
 
+
+@pytest.mark.asyncio
+async def test_resolve_confidence_conflict_prefers_highest_confidence_not_first(arbitration_layer, sample_subtask):
+    """Regression test for issue #174: should not always choose first response."""
+    low_confidence = AgentResponse(
+        subtask_id=sample_subtask.id,
+        model_used="model-a",
+        content="Low confidence answer",
+        success=True,
+        self_assessment=SelfAssessment(
+            confidence_score=0.51,
+            assumptions=["weak assumption"],
+            risk_level=RiskLevel.MEDIUM,
+            estimated_cost=0.01,
+            token_usage=100,
+            execution_time=0.2,
+            model_used="model-a",
+        ),
+    )
+    high_confidence = AgentResponse(
+        subtask_id=sample_subtask.id,
+        model_used="model-b",
+        content="High confidence answer",
+        success=True,
+        self_assessment=SelfAssessment(
+            confidence_score=0.92,
+            assumptions=[],
+            risk_level=RiskLevel.LOW,
+            estimated_cost=0.01,
+            token_usage=100,
+            execution_time=0.2,
+            model_used="model-b",
+        ),
+    )
+
+    conflict = Conflict(
+        response_ids=[
+            f"{sample_subtask.id}_model-a",
+            f"{sample_subtask.id}_model-b",
+        ],
+        conflict_type="confidence_conflict",
+        description="confidence gap",
+    )
+
+    resolution = await arbitration_layer.resolve_contradiction(conflict, [low_confidence, high_confidence])
+    assert resolution.chosen_response_id == f"{sample_subtask.id}_model-b"
+
+
+@pytest.mark.asyncio
+async def test_resolve_unknown_conflict_with_context_uses_best_score(arbitration_layer, sample_subtask):
+    """Unknown conflict types should still use score-based fallback when responses are provided."""
+    weaker = AgentResponse(
+        subtask_id=sample_subtask.id,
+        model_used="model-a",
+        content="Weak answer",
+        success=True,
+        self_assessment=SelfAssessment(
+            confidence_score=0.55,
+            assumptions=["a", "b"],
+            risk_level=RiskLevel.HIGH,
+            estimated_cost=0.01,
+            token_usage=50,
+            execution_time=0.2,
+            model_used="model-a",
+        ),
+    )
+    stronger = AgentResponse(
+        subtask_id=sample_subtask.id,
+        model_used="model-b",
+        content="Much stronger answer with more complete details" * 3,
+        success=True,
+        self_assessment=SelfAssessment(
+            confidence_score=0.9,
+            assumptions=[],
+            risk_level=RiskLevel.LOW,
+            estimated_cost=0.01,
+            token_usage=80,
+            execution_time=0.2,
+            model_used="model-b",
+        ),
+    )
+
+    conflict = Conflict(
+        response_ids=[
+            f"{sample_subtask.id}_model-a",
+            f"{sample_subtask.id}_model-b",
+        ],
+        conflict_type="unknown",
+        description="unknown conflict type",
+    )
+
+    resolution = await arbitration_layer.resolve_contradiction(conflict, [weaker, stronger])
+    assert resolution.chosen_response_id == f"{sample_subtask.id}_model-b"
+    assert "selected best available response" in resolution.reasoning
+
 def test_risk_level_to_score(arbitration_layer):
     assert arbitration_layer._risk_level_to_score(RiskLevel.LOW) == 1.0
     assert arbitration_layer._risk_level_to_score(RiskLevel.CRITICAL) == 0.1

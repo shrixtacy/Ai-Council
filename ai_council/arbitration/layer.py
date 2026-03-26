@@ -1,6 +1,5 @@
 """Implementation of the ArbitrationLayer for conflict resolution between agent responses."""
 
-from http.client import responses
 from difflib import SequenceMatcher
 
 
@@ -63,7 +62,6 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         return sum(scores) / len(scores) if scores else 1.0
 
     async def arbitrate(self, responses: List[AgentResponse]) -> ArbitrationResult:
-        print("DEBUG: Responses received:", responses) 
         """
         Arbitrate between multiple agent responses to resolve conflicts.
         
@@ -231,13 +229,65 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
         elif conflict.conflict_type == "quality_conflict":
             return await self._resolve_quality_conflict(conflict, responses)
         else:
-            # Default resolution: choose first response with warning
+            # Unknown conflict type: still attempt score-based fallback when possible
             logger.warning("Unknown conflict type", extra={"conflict_type": conflict.conflict_type})
+            best_resp = self._select_best_response_for_conflict(conflict, responses)
+            chosen_response_id = best_resp.subtask_id + "_" + best_resp.model_used if best_resp else conflict.response_ids[0]
             return Resolution(
-                chosen_response_id=conflict.response_ids[0],
-                reasoning=f"Unknown conflict type '{conflict.conflict_type}', defaulted to first response",
-                confidence=0.5
+                chosen_response_id=chosen_response_id,
+                reasoning=(
+                    f"Unknown conflict type '{conflict.conflict_type}', "
+                    "selected best available response by composite quality score"
+                    if best_resp
+                    else f"Unknown conflict type '{conflict.conflict_type}', defaulted to first response"
+                ),
+                confidence=0.55 if best_resp else 0.5
             )
+
+    def _select_best_response_for_conflict(
+        self,
+        conflict: Conflict,
+        responses: Optional[List[AgentResponse]] = None,
+    ) -> Optional[AgentResponse]:
+        """Select best response for a conflict using confidence + quality scoring.
+
+        Selection order:
+        1. Responses matching conflict IDs exactly (`subtask_model` format)
+        2. Best-effort matching by model ID token from conflict IDs
+        3. Fallback to all successful responses
+        """
+        if not responses:
+            return None
+
+        successful = [r for r in responses if r.success]
+        if not successful:
+            return None
+
+        response_map = {
+            f"{r.subtask_id}_{r.model_used}": r
+            for r in successful
+        }
+
+        # 1) Exact conflict-id matches
+        candidates = [response_map[rid] for rid in conflict.response_ids if rid in response_map]
+
+        # 2) Best-effort model-id matching when IDs are malformed/partial
+        if not candidates:
+            model_tokens = {rid.split("_", 1)[-1] for rid in conflict.response_ids if "_" in rid}
+            if model_tokens:
+                candidates = [r for r in successful if r.model_used in model_tokens]
+
+        # 3) Final fallback to all successful responses
+        if not candidates:
+            candidates = successful
+
+        return max(
+            candidates,
+            key=lambda r: (
+                self._calculate_quality_score(r),
+                r.self_assessment.confidence_score if r.self_assessment else 0.0,
+            ),
+        )
     
     def _group_responses_by_subtask(self, responses: List[AgentResponse]) -> Dict[str, List[AgentResponse]]:
         """Group responses by their subtask ID."""
@@ -354,22 +404,14 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
     
     async def _resolve_content_contradiction(self, conflict: Conflict, responses: Optional[List[AgentResponse]] = None) -> Resolution:
         """Resolve content contradictions by choosing the most reliable response."""
-        if not responses:
+        best_resp = self._select_best_response_for_conflict(conflict, responses)
+        if not best_resp:
             return Resolution(
                 chosen_response_id=conflict.response_ids[0],
                 reasoning="Resolved content contradiction by default (no responses context)",
                 confidence=0.7
             )
-            
-        conflict_responses = [r for r in responses if r.subtask_id + "_" + r.model_used in conflict.response_ids]
-        if not conflict_responses:
-            return Resolution(
-                chosen_response_id=conflict.response_ids[0],
-                reasoning="Resolved content contradiction by default (responses not found)",
-                confidence=0.7
-            )
-            
-        best_resp = max(conflict_responses, key=lambda r: self._calculate_quality_score(r))
+
         return Resolution(
             chosen_response_id=best_resp.subtask_id + "_" + best_resp.model_used,
             reasoning="Resolved content contradiction by selecting response with highest composite score",
@@ -378,22 +420,14 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
     
     async def _resolve_confidence_conflict(self, conflict: Conflict, responses: Optional[List[AgentResponse]] = None) -> Resolution:
         """Resolve confidence conflicts by choosing the most confident response."""
-        if not responses:
+        best_resp = self._select_best_response_for_conflict(conflict, responses)
+        if not best_resp:
             return Resolution(
                 chosen_response_id=conflict.response_ids[0],
                 reasoning="Resolved confidence conflict by default (no responses context)",
                 confidence=0.8
             )
-            
-        conflict_responses = [r for r in responses if r.subtask_id + "_" + r.model_used in conflict.response_ids]
-        if not conflict_responses:
-            return Resolution(
-                chosen_response_id=conflict.response_ids[0],
-                reasoning="Resolved confidence conflict by default (responses not found)",
-                confidence=0.8
-            )
-            
-        best_resp = max(conflict_responses, key=lambda r: r.self_assessment.confidence_score if getattr(r, 'self_assessment', None) and getattr(r.self_assessment, 'confidence_score', None) is not None else 0.0)
+
         return Resolution(
             chosen_response_id=best_resp.subtask_id + "_" + best_resp.model_used,
             reasoning="Resolved confidence conflict by selecting response with highest confidence score",
@@ -402,22 +436,14 @@ class ConcreteArbitrationLayer(ArbitrationLayer):
     
     async def _resolve_quality_conflict(self, conflict: Conflict, responses: Optional[List[AgentResponse]] = None) -> Resolution:
         """Resolve quality conflicts by choosing the highest quality response."""
-        if not responses:
+        best_resp = self._select_best_response_for_conflict(conflict, responses)
+        if not best_resp:
             return Resolution(
                 chosen_response_id=conflict.response_ids[0],
                 reasoning="Resolved quality conflict by default (no responses context)",
                 confidence=0.75
             )
-            
-        conflict_responses = [r for r in responses if r.subtask_id + "_" + r.model_used in conflict.response_ids]
-        if not conflict_responses:
-            return Resolution(
-                chosen_response_id=conflict.response_ids[0],
-                reasoning="Resolved quality conflict by default (responses not found)",
-                confidence=0.75
-            )
-            
-        best_resp = max(conflict_responses, key=lambda r: self._calculate_quality_score(r))
+
         return Resolution(
             chosen_response_id=best_resp.subtask_id + "_" + best_resp.model_used,
             reasoning="Resolved quality conflict by selecting response with highest quality score",
