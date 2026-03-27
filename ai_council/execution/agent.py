@@ -70,154 +70,133 @@ class BaseExecutionAgent(ExecutionAgent):
     def _count_tokens(self, text: str) -> int:
         """Estimate tokens using simple logic (for tests)."""
         return max(1, len(text) // 4)
-    
-    async def execute(self, subtask: Subtask, model: AIModel, depth: int = 0) -> AgentResponse:
-        """Execute a subtask using the specified AI model with comprehensive failure handling.
-        
-        Args:
-            subtask: The subtask to execute
-            model: The AI model to use for execution
-            depth: Current fallback depth
-            
-        Returns:
-            AgentResponse: The response including content and self-assessment
-        """
+
+    async def execute(
+    self, 
+    subtask: Subtask, 
+    model: AIModel, 
+    depth: int = 0,
+    fallback_chain: Optional[list[str]] = None
+    ) -> AgentResponse:
         start_time = time.time()
         model_id = model.get_model_id()
-        
+
         logger.info("Executing subtask", extra={"subtask_id": subtask.id, "model_id": model_id})
-        
-        # Track execution attempt
+
         execution_key = f"{subtask.id}_{model_id}"
         self._execution_history[execution_key] = {
-            "attempts": 0,
-            "start_time": start_time,
-            "subtask_id": subtask.id,
-            "model_id": model_id
-        }
-        
-        # Check if component is isolated
+        "attempts": 0,
+        "start_time": start_time,
+        "subtask_id": subtask.id,
+        "model_id": model_id
+    }
+
+        # Isolation check
         if resilience_manager.failure_isolator.is_isolated(f"model_{model_id}"):
-            logger.warning("Model", extra={"model_id": model_id})
             return self._create_failure_response(
-                subtask, model_id, "Model is temporarily isolated", start_time
-            )
-        
+            subtask, model_id, "Model is temporarily isolated", start_time
+        )
+
         last_error = None
         recovery_action = None
-        
+
         for attempt in range(self.max_retries + 1):
             try:
                 self._execution_history[execution_key]["attempts"] = attempt + 1
-                
-                # Apply rate limiting
+
+                # Rate limiting
                 provider = self._get_model_provider(model)
                 while True:
                     allowed, wait_time = rate_limit_manager.check_rate_limit(provider)
                     if not allowed:
-                        logger.info("Rate limit hit", extra={"provider": provider, "wait_time": wait_time})
                         await asyncio.sleep(wait_time)
                     else:
                         break
-                
-                # Execute with circuit breaker and timeout
+
+                # Execute model
                 response_content = await self._execute_with_protection(subtask, model)
-                
-                # Generate self-assessment
-                self_assessment = await self.generate_self_assessment(response_content, subtask, model_id)
+
+                # Self assessment
+                self_assessment = await self.generate_self_assessment(
+                    response_content, subtask, model_id
+                )
                 self_assessment.model_used = model_id
                 self_assessment.execution_time = time.time() - start_time
-                
-                # Record successful execution time for adaptive timeouts
+
                 execution_time = time.time() - start_time
                 adaptive_timeout_manager.record_execution_time("model_execution", execution_time)
-                
-                # Create successful response
-                agent_response = AgentResponse(
-                    subtask_id=subtask.id,
-                    model_used=model_id,
-                    content=response_content,
-                    self_assessment=self_assessment,
-                    timestamp=datetime.now(timezone.utc),
-                    success=True,
-                    metadata={
-                        "attempts": attempt + 1,
-                        "execution_time": execution_time,
-                        "prompt_length": len(self._build_prompt(subtask)),
-                        "recovery_action": recovery_action.action_type if recovery_action else None
+
+                return AgentResponse(
+                subtask_id=subtask.id,
+                model_used=model_id,
+                content=response_content,
+                self_assessment=self_assessment,
+                timestamp=datetime.now(timezone.utc),
+                success=True,
+                metadata={
+                    "attempts": attempt + 1,
+                    "execution_time": execution_time,
+                    "prompt_length": len(self._build_prompt(subtask)),
+                    "recovery_action": recovery_action.action_type if recovery_action else None
                     }
                 )
-                
-                logger.info("Successfully executed subtask", extra={"subtask_id": subtask.id, "attempt": attempt + 1})
-                return agent_response
-                
+
             except Exception as e:
                 last_error = e
-
-                # Create failure event
                 failure_event = self._create_failure_event(e, subtask, model_id, attempt)
-
-                # Get recovery action
                 recovery_action = resilience_manager.handle_failure(failure_event)
 
                 logger.warning(
-                    f"Attempt {attempt + 1} failed for subtask {subtask.id} "
-                    f"with model {model_id}: {str(e)} - Recovery: {recovery_action.action_type if recovery_action else 'None'}"
+                f"Attempt {attempt + 1} failed for subtask {subtask.id} "
+                f"with model {model_id}: {str(e)}"
                 )
 
-                # ONLY trigger fallback after max retries
+                # ✅ CASE 1: retries exhausted → fallback
                 if attempt >= self.max_retries:
 
-                    # STEP 1: merge fallback sources (ONLY use resilience)
                     fallback_models = []
 
-                    if recovery_action and recovery_action.metadata and "fallback_models" in recovery_action.metadata:
-                        fallback_models.extend(recovery_action.metadata["fallback_models"])
+                    if fallback_chain:
+                        fallback_models.extend(fallback_chain)
 
-                    if recovery_action and recovery_action.fallback_model:
-                        fallback_models.insert(0, recovery_action.fallback_model)
+                    if recovery_action:
+                        if recovery_action.metadata and "fallback_models" in recovery_action.metadata:
+                            fallback_models.extend(recovery_action.metadata["fallback_models"])
 
-                    # remove duplicates
+                        if recovery_action.fallback_model:
+                            fallback_models.insert(0, recovery_action.fallback_model)
+
                     seen = set()
-                    fallback_models = [m for m in fallback_models if not (m in seen or seen.add(m))]
+                    fallback_models = [
+                        m for m in fallback_models
+                        if m != model_id and not (m in seen or seen.add(m))
+                    ]
 
-                    # STEP 2: execute fallback chain
                     if fallback_models:
-                        logger.info("Iterating over fallback chain", extra={
-                            "subtask_id": subtask.id,
-                            "original_model": model_id,
-                            "fallback_chain": fallback_models
-                        })
-
-                        fallback_errors = []
-
                         for fallback_model_id in fallback_models:
                             response = await self._execute_with_fallback(
-                                subtask, fallback_model_id, start_time, depth
+                            subtask,
+                            fallback_model_id,
+                            start_time,
+                            depth,
+                            fallback_models
                             )
 
                             if response.success:
                                 return response
 
-                            fallback_errors.append({
-                                "model_id": fallback_model_id,
-                                "error": response.error_message
-                            })
-
-                        return self._create_failure_response(
-                            subtask,
-                            model_id,
-                            f"All fallback models failed. Last error: {fallback_errors[-1]['error'] if fallback_errors else str(last_error)}",
-                            start_time
-                        )
-
-                    elif recovery_action and recovery_action.skip_subtask:
+                    if recovery_action and recovery_action.skip_subtask:
                         return self._create_skip_response(subtask, model_id, start_time)
-
+                    
+                    # final failure
+                    return self._create_failure_response(
+                    subtask,
+                    model_id,
+                    f"All fallback models failed. Last error: {str(last_error)}",
+                    start_time
+                    )
                 else:
-                    break
-                        
-        return self._create_failure_response(subtask, model_id, str(last_error), start_time)
+                    continue
     
     async def _execute_with_protection(self, subtask: Subtask, model: AIModel) -> str:
         """Execute model call with circuit breaker and timeout protection."""
@@ -304,11 +283,12 @@ class BaseExecutionAgent(ExecutionAgent):
         subtask: Subtask, 
         fallback_model_id: str, 
         original_start_time: float,
-        depth: int = 0
+        depth: int = 0,
+        fallback_chain: Optional[list[str]] = None
     ) -> AgentResponse:
         """Execute subtask with fallback model."""
         MAX_FALLBACK_DEPTH = 3
-        
+    
         if depth >= MAX_FALLBACK_DEPTH:
             logger.error(
                 "Maximum fallback depth reached", 
@@ -326,39 +306,45 @@ class BaseExecutionAgent(ExecutionAgent):
                 "depth": depth + 1
             }
         )
-        
+    
         if not self.model_registry:
-            logger.error("Model registry not available for fallback resolution")
             return self._create_failure_response(
-                subtask, fallback_model_id, "Model registry not available", original_start_time
-            )
+            subtask, fallback_model_id, "Model registry not available", original_start_time
+        )
 
         fallback_model = self.model_registry.get_model_by_id(fallback_model_id)
-        if not fallback_model:
-            logger.error("Fallback model not found in registry", extra={"model_id": fallback_model_id})
-            return self._create_failure_response(
-                subtask, fallback_model_id, f"Fallback model {fallback_model_id} not found in registry", original_start_time
-            )
 
-        # Recursively call execute with the fallback model
-        response = await self.execute(subtask, fallback_model, depth=depth + 1)
-        
-        # Update metadata to track fallback chain
+        if not fallback_model:
+            return self._create_failure_response(
+            subtask, fallback_model_id,
+            f"Fallback model {fallback_model_id} not found in registry",
+            original_start_time
+        )
+
+        # THEN call execute
+        response = await self.execute(
+        subtask,
+        fallback_model,
+        depth=depth + 1,
+        fallback_chain=fallback_chain
+        )
+    
+            # Update metadata to track fallback chain
         if response.metadata is None:
             response.metadata = {}
-        
-        # Only set if not already present (deepest call sets it first)
+    
+            # Only set if not already present (deepest call sets it first)
         if "fallback_depth" not in response.metadata:
             response.metadata["fallback_depth"] = depth + 1
-        
+    
         if "is_fallback" not in response.metadata:
             response.metadata["is_fallback"] = True
-            
+        
         if "original_start_time" not in response.metadata:
             response.metadata["original_start_time"] = original_start_time
 
         return response
-    
+
     def _create_skip_response(
         self, 
         subtask: Subtask, 
@@ -367,56 +353,56 @@ class BaseExecutionAgent(ExecutionAgent):
     ) -> AgentResponse:
         """Create response for skipped subtask."""
         execution_time = time.time() - start_time
-        
+    
         return AgentResponse(
             subtask_id=subtask.id,
             model_used=model_id,
             content="",
             self_assessment=SelfAssessment(
-                confidence_score=0.0,
-                risk_level=RiskLevel.LOW,
-                model_used=model_id,
-                execution_time=execution_time,
-                assumptions=["Subtask skipped due to system overload"]
-            ),
-            timestamp=datetime.now(timezone.utc),
-            success=False,
-            error_message="Subtask skipped due to load shedding",
-            metadata={
-                "skipped": True,
-                "reason": "load_shedding"
-            }
-        )
-    
+            confidence_score=0.0,
+            risk_level=RiskLevel.LOW,
+            model_used=model_id,
+            execution_time=execution_time,
+            assumptions=["Subtask skipped due to system overload"]
+        ),
+        timestamp=datetime.now(timezone.utc),
+        success=False,
+        error_message="Subtask skipped due to load shedding",
+        metadata={
+            "skipped": True,
+            "reason": "load_shedding"
+        }
+    )
+
     def _create_failure_response(
-        self, 
-        subtask: Subtask, 
-        model_id: str, 
-        error_message: str, 
-        start_time: float
+    self, 
+    subtask: Subtask, 
+    model_id: str, 
+    error_message: str, 
+    start_time: float
     ) -> AgentResponse:
         """Create failure response."""
         execution_time = time.time() - start_time
-        
+    
         return AgentResponse(
-            subtask_id=subtask.id,
+        subtask_id=subtask.id,
+        model_used=model_id,
+        content="",
+        self_assessment=SelfAssessment(
+            confidence_score=0.0,
+            risk_level=RiskLevel.CRITICAL,
             model_used=model_id,
-            content="",
-            self_assessment=SelfAssessment(
-                confidence_score=0.0,
-                risk_level=RiskLevel.CRITICAL,
-                model_used=model_id,
-                execution_time=execution_time
-            ),
-            timestamp=datetime.now(timezone.utc),
-            success=False,
-            error_message=f"Failed after {self.max_retries + 1} attempts: {error_message}",
-            metadata={
-                "attempts": self.max_retries + 1,
-                "execution_time": execution_time,
-                "final_error": error_message
-            }
-        )
+            execution_time=execution_time
+        ),
+        timestamp=datetime.now(timezone.utc),
+        success=False,
+        error_message=f"Failed after {self.max_retries + 1} attempts: {error_message}",
+        metadata={
+            "attempts": self.max_retries + 1,
+            "execution_time": execution_time,
+            "final_error": error_message
+        }
+    )
     
     def _get_model_provider(self, model: AIModel) -> str:
         """Get provider name from model metadata for rate limiting.
