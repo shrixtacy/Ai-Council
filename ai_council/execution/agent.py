@@ -221,8 +221,14 @@ class BaseExecutionAgent(ExecutionAgent):
     
     async def _call_model(self, subtask: Subtask, model: AIModel) -> str:
         """Make the actual model API call."""
+        prompt = self._build_prompt(subtask)
+        
+        # Note: If your underlying AIModel expects a string, keep this if/else.
+        # If your AIModel has been updated to accept a list natively, you can just pass 'prompt' directly.
+        prompt_payload = self._flatten_prompt(prompt)
+
         return await model.generate_response(
-            prompt=self._build_prompt(subtask),
+            prompt=prompt_payload,
             max_tokens=self._calculate_max_tokens(subtask),
             temperature=self._get_temperature(subtask)
         )
@@ -509,36 +515,44 @@ class BaseExecutionAgent(ExecutionAgent):
             retry_suggested=retry_suggested
         )
     
-    def _build_prompt(self, subtask: Subtask) -> str:
-        """Build an appropriate prompt for the subtask.
-        
-        Args:
-            subtask: The subtask to build a prompt for
-            
-        Returns:
-            str: The constructed prompt
-        """
-        # Basic prompt construction - can be enhanced based on task type
-        prompt_parts = []
-        
-        # Add task type specific instructions
+    def _build_prompt(self, subtask: Subtask):
+        """Build prompt as structured messages (LLM compatible)."""
+
+        messages = []
+
+        # Combine system prompt + task instructions
+        system_content = []
+
+        if hasattr(subtask, "system_prompt") and subtask.system_prompt:
+            system_content.append(subtask.system_prompt)
+
         if subtask.task_type:
             task_instructions = self._get_task_type_instructions(subtask.task_type)
             if task_instructions:
-                prompt_parts.append(task_instructions)
-        
-        # Add the main content
-        prompt_parts.append(f"Task: {subtask.content}")
-        
-        # Add quality requirements
-        if subtask.accuracy_requirement > 0.8:
-            prompt_parts.append("Please provide a high-quality, accurate response.")
-        
-        # Add risk level considerations
-        if subtask.risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
-            prompt_parts.append("This is a high-risk task. Please be extra careful and thorough.")
-        
-        return "\n\n".join(prompt_parts)
+                system_content.append(task_instructions)
+
+        if system_content:
+            messages.append({
+                "role": "system",
+                "content": "\n".join(system_content)
+            })
+
+        # Add history
+        if hasattr(subtask, "history") and subtask.history:
+            for msg in subtask.history:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+
+        # Add user message
+        messages.append({
+            "role": "user",
+            "content": subtask.content
+        })
+
+        return messages
     
     def _get_task_type_instructions(self, task_type) -> Optional[str]:
         """Get specific instructions for different task types.
@@ -795,7 +809,9 @@ class BaseExecutionAgent(ExecutionAgent):
             Dict[str, int]: Estimated token counts for input and output
         """
 
-        prompt_text = self._build_prompt(subtask)
+        prompt = self._build_prompt(subtask)
+        prompt_text = self._flatten_prompt(prompt)
+
         input_tokens = max(1, self._count_tokens(prompt_text))
         output_tokens = max(1, self._count_tokens(response))
         
