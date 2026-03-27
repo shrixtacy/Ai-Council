@@ -463,7 +463,7 @@ Built with modern Python best practices and inspired by the need for intelligent
 
 [![PyPI](https://img.shields.io/pypi/v/ai-council-orchestrator.svg)](https://pypi.org/project/ai-council-orchestrator/)
 [![Downloads](https://pepy.tech/badge/ai-council-orchestrator/month)](https://pepy.tech/project/ai-council-orchestrator)
-[![GitHub](https://img.shields.io/github/license/shrixtacy/Ai-Council.svg)](https://github.com/shrixtacy/Ai-Council/blob/main/LICENSE)
+[![GitHub](https://img.shields.io/github/license/shrixtacy/Ai-Council.svg)](https://github.com/shrixtacy/Ai-Council/blob/master/LICENSE)
 
 [Get Started](./docs/usage/USAGE_GUIDE.md) • [View Examples](./examples/) • [Read Docs](./docs/) • [API Reference](./docs/API_REFERENCE.md) • [Contribute](./CONTRIBUTING.md)
 
