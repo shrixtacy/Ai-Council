@@ -11,6 +11,8 @@ import redis.asyncio as redis
 from ..core.interfaces import ExecutionAgent, AIModel, ModelError, FailureResponse
 from ..core.models import Subtask, AgentResponse, SelfAssessment, RiskLevel, Priority, TaskType
 from ..core.failure_handling import FailureType, create_failure_event, resilience_manager
+from ..core.tracing import setup_tracing, get_tracer
+from opentelemetry.propagate import inject
 
 logger = get_logger(__name__)
 
@@ -26,6 +28,8 @@ class MQExecutionAgent(ExecutionAgent):
         self.timeout_seconds = timeout_seconds
         self.redis_client = None
         self.task_queue = "ai_council:tasks"
+        setup_tracing("ai_council_mq_agent")
+        self.tracer = get_tracer("mq_execution_agent")
         self._ensure_connection()
 
     def _ensure_connection(self):
@@ -120,6 +124,8 @@ class MQExecutionAgent(ExecutionAgent):
             )
 
     def _serialize_task(self, subtask: Subtask, model_id: str) -> Dict[str, Any]:
+        carrier = {}
+        inject(carrier)
         return {
             "subtask_id": subtask.id,
             "parent_task_id": subtask.parent_task_id,
@@ -131,7 +137,8 @@ class MQExecutionAgent(ExecutionAgent):
             "accuracy_requirement": subtask.accuracy_requirement,
             "estimated_cost": subtask.estimated_cost,
             "metadata": subtask.metadata,
-            "model_id": model_id
+            "model_id": model_id,
+            "trace_context": carrier
         }
 
     def _deserialize_response(self, response_json: str, start_time: float) -> AgentResponse:

@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    command: python -m ai_council.main
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318/v1/traces
+      - USE_MQ=True
+    depends_on:
+      - redis
+      - jaeger
+    networks:
+      - ai_council_net
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    command: python -m ai_council.execution.worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318/v1/traces
+    depends_on:
+      - redis
+      - jaeger
+    deploy:
+      replicas: 3
+    networks:
+      - ai_council_net
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - ai_council_net
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - ai_council_net
+
+networks:
+  ai_council_net:
+    driver: bridge

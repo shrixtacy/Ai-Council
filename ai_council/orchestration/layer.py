@@ -33,7 +33,7 @@ from ..core.exceptions import (
 from ..core.error_handling import create_error_response
 from .cost_optimizer import CostOptimizer
 from ..cache.manager import CacheManager
-
+from ..core.tracing import setup_tracing, get_tracer
 
 logger = get_logger(__name__)
 
@@ -423,95 +423,111 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         final_response= None
         explanation= None
         
+        setup_tracing("ai_council_orchestrator")
+        tracer = get_tracer("orchestration_layer")
+        
         try:
-            logger.info("Processing request", extra={"mode": execution_mode.value, "input_sample": user_input[:100]})
-            
-            # Stage 1: Analysis and Task Creation
-            task = await self._stage_analyze_and_create_task(user_input, execution_mode)
-            execution_metadata.execution_path.append("analysis")
-            
-            # Check Caching Layer
-            cached_response = await self.cache_manager.check_cache(task)
-            if cached_response:
-                logger.info("Cache hit, short-circuiting execution", extra={"input_sample": user_input[:100]})
-                return cached_response
-            
-            # Stage 2: Cost Estimation (if required by execution mode)
-            if execution_mode != ExecutionMode.FAST:
-                cost_estimate = await self._stage_estimate_cost(task)
-                if cost_estimate:
-                    logger.info("Estimated cost", extra={"cost": cost_estimate.estimated_cost, "time": cost_estimate.estimated_time})
-            
-            # Stage 3: Task Decomposition
-            subtasks = await self._stage_decompose_task(task)
-            execution_metadata.execution_path.append("decomposition")
-            logger.info("Decomposed into", extra={"count": len(subtasks)})
-            
-            # Stage 4: Execution Planning
-            execution_plan = await self._stage_plan_execution(subtasks)
-            execution_metadata.parallel_executions = len(execution_plan.parallel_groups)
-            execution_metadata.execution_path.append("execution_planning")
-            
-            # Stage 5: Execute Subtasks
-            agent_responses = await self._stage_execute_subtasks(
-                subtasks, execution_plan, execution_mode, progress_callback
-            )
-            execution_metadata.execution_path.append("subtask_execution")
-            execution_metadata.models_used = list(set(
-                resp.model_used for resp in agent_responses if resp.success
-            ))
-            
-            # Check for partial failure
-            partial_failure_action = self._stage_check_partial_failure(
-                agent_responses, execution_metadata
-            )
-            
-            if partial_failure_action == "fail":
-                return self._create_degraded_response(
-                    "Too many subtask failures", execution_metadata, start_time,
-                    f"Success rate below {self.partial_failure_threshold:.0%} threshold"
+            with tracer.start_as_current_span(
+                "process_request",
+                attributes={"execution_mode": execution_mode.value, "input_length": len(user_input)}
+            ) as span:
+                logger.info("Processing request", extra={"mode": execution_mode.value, "input_sample": user_input[:100]})
+                
+                # Stage 1: Analysis and Task Creation
+                task = await self._stage_analyze_and_create_task(user_input, execution_mode)
+                execution_metadata.execution_path.append("analysis")
+                
+                # Check Caching Layer
+                cached_response = await self.cache_manager.check_cache(task)
+                if cached_response:
+                    logger.info("Cache hit, short-circuiting execution", extra={"input_sample": user_input[:100]})
+                    span.set_attribute("cache_hit", True)
+                    return cached_response
+                
+                # Stage 2: Cost Estimation (if required by execution mode)
+                if execution_mode != ExecutionMode.FAST:
+                    cost_estimate = await self._stage_estimate_cost(task)
+                    if cost_estimate:
+                        logger.info("Estimated cost", extra={"cost": cost_estimate.estimated_cost, "time": cost_estimate.estimated_time})
+                
+                # Stage 3: Task Decomposition
+                subtasks = await self._stage_decompose_task(task)
+                execution_metadata.execution_path.append("decomposition")
+                logger.info("Decomposed into", extra={"count": len(subtasks)})
+                span.set_attribute("num_subtasks", len(subtasks))
+                
+                # Stage 4: Execution Planning
+                execution_plan = await self._stage_plan_execution(subtasks)
+                execution_metadata.parallel_executions = len(execution_plan.parallel_groups)
+                execution_metadata.execution_path.append("execution_planning")
+                
+                # Stage 5: Execute Subtasks
+                agent_responses = await self._stage_execute_subtasks(
+                    subtasks, execution_plan, execution_mode, progress_callback
                 )
-            
-            # Filter successful responses
-            successful_responses = [resp for resp in agent_responses if resp.success]
-            if not successful_responses:
-                return self._create_degraded_response(
-                    "All subtasks failed", execution_metadata, start_time,
-                    "No successful subtask executions"
+                execution_metadata.execution_path.append("subtask_execution")
+                execution_metadata.models_used = list(set(
+                    resp.model_used for resp in agent_responses if resp.success
+                ))
+                
+                # Check for partial failure
+                partial_failure_action = self._stage_check_partial_failure(
+                    agent_responses, execution_metadata
                 )
-            
-            # Stage 6: Arbitration
-            try:
-                validated_responses, explanation,arbitration_decisions = await self._stage_arbitrate(successful_responses)
+                
+                if partial_failure_action == "fail":
+                    span.set_attribute("success", False)
+                    return self._create_degraded_response(
+                        "Too many subtask failures", execution_metadata, start_time,
+                        f"Success rate below {self.partial_failure_threshold:.0%} threshold"
+                    )
+                
+                # Filter successful responses
+                successful_responses = [resp for resp in agent_responses if resp.success]
+                if not successful_responses:
+                    span.set_attribute("success", False)
+                    return self._create_degraded_response(
+                        "All subtasks failed", execution_metadata, start_time,
+                        "No successful subtask executions"
+                    )
+                
+                # Stage 6: Arbitration
+                try:
+                    validated_responses, explanation,arbitration_decisions = await self._stage_arbitrate(successful_responses)
 
-            except Exception as e:
-                logger.warning("Arbitration unpacking failed", extra={"error": str(e)})
-                validated_responses = successful_responses[:1]
-                explanation = None
-            
-            execution_metadata.execution_path.append("arbitration")
-            
-            # Stage 7: Synthesis
-            final_response = await self._stage_synthesize(validated_responses)
-            final_response.explanation = explanation
-            final_response.arbitration_decisions = arbitration_decisions
-            execution_metadata.execution_path.append("synthesis")
-            
-            # Stage 8: Attach Metadata
-            execution_metadata.total_execution_time = time.time() - start_time
-            final_response = await self._stage_attach_metadata(final_response, execution_metadata)
-            
-            # Store response in Cache Layer
-            await self.cache_manager.store_response(task, final_response)
-            
-            logger.info("Request processed successfully", 
-                extra={"execution_time": round(execution_metadata.total_execution_time, 2)}
-            )
-            return final_response
+                except Exception as e:
+                    logger.warning("Arbitration unpacking failed", extra={"error": str(e)})
+                    validated_responses = successful_responses[:1]
+                    explanation = None
+                
+                execution_metadata.execution_path.append("arbitration")
+                
+                # Stage 7: Synthesis
+                final_response = await self._stage_synthesize(validated_responses)
+                final_response.explanation = explanation
+                final_response.arbitration_decisions = arbitration_decisions
+                execution_metadata.execution_path.append("synthesis")
+                
+                # Stage 8: Attach Metadata
+                execution_metadata.total_execution_time = time.time() - start_time
+                final_response = await self._stage_attach_metadata(final_response, execution_metadata)
+                
+                # Store response in Cache Layer
+                await self.cache_manager.store_response(task, final_response)
+                
+                logger.info("Request processed successfully", 
+                    extra={"execution_time": round(execution_metadata.total_execution_time, 2)}
+                )
+                span.set_attribute("success", True)
+                span.set_attribute("total_cost", final_response.cost_breakdown.total_cost if final_response.cost_breakdown else 0)
+                return final_response
             
         except TimeoutError as e:
             logger.error("Request processing timed out", extra={"error": str(e)})
-            raise ModelTimeoutError(f"Request processing timed out: {str(e)}", original_error=e)
+            return self._create_degraded_response(
+                "Request timed out", execution_metadata, start_time,
+                str(e)
+            )
             
         except AICouncilError:
             # Re-raise AICouncilError exceptions
@@ -522,18 +538,18 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             execution_time = time.time() - start_time
             
             # Record system failure
-        failure_event = create_failure_event(
-            failure_type=FailureType.SYSTEM_OVERLOAD,
-            component="orchestration_layer",
-            error_message=str(e),
-            context={"execution_time": execution_time}
-        )
-        resilience_manager.handle_failure(failure_event)
+            failure_event = create_failure_event(
+                failure_type=FailureType.SYSTEM_OVERLOAD,
+                component="orchestration_layer",
+                error_message=str(e),
+                context={"execution_time": execution_time}
+            )
+            resilience_manager.handle_failure(failure_event)
             
-        return create_error_response(
-            e,
-            context={'component': 'orchestration_layer.process_request'}
-        )
+            return create_error_response(
+                e,
+                context={'component': 'orchestration_layer.process_request'}
+            )
     
     # =========================================================================
     # PROTECTED METHODS - With circuit breaker protection

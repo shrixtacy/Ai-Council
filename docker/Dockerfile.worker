@@ -1,0 +1,19 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY pyproject.toml .
+# We just pip install the directory itself later, but let's install base stuff
+# Or we can just pip install the current directory.
+RUN pip install --no-cache-dir .[all] || true
+# Let's install requirements directly via pip using pyproject since this is a local build
+COPY . .
+RUN pip install -e .
+
+# Environment vars
+ENV REDIS_URL="redis://redis:6379/0"
+ENV OTEL_EXPORTER_OTLP_ENDPOINT="http://jaeger:4318/v1/traces"
+
+# Command to run worker
+CMD ["python", "-m", "ai_council.execution.worker"]
