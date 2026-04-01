@@ -43,7 +43,7 @@ const Dashboard = () => {
     <div className="min-h-screen p-6">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
+        <div className="bg-white rounded-2xl shadow-md p-6 mb-6 transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-gradient-to-r from-primary-600 to-primary-700 rounded-full flex items-center justify-center">
@@ -72,8 +72,15 @@ const Dashboard = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.1 }}
+               whileHover={{ 
+                      scale: 1.05, 
+                      boxShadow: "0px 10px 25px rgba(0,0,0,0.15)" 
+               }}
+               whileTap={{ 
+                      scale: 0.95 
+               }}
               onClick={() => navigate(card.path)}
-              className="bg-white rounded-2xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-shadow"
+              className="bg-white rounded-2xl shadow-md p-6 cursor-pointer transition-all duration-300"
             >
               <div className={`w-12 h-12 bg-gradient-to-r ${card.color} rounded-lg flex items-center justify-center mb-4`}>
                 <card.icon className="w-6 h-6 text-white" />
@@ -85,7 +92,7 @@ const Dashboard = () => {
         </div>
 
         {/* Info */}
-        <div className="mt-6 bg-gradient-to-r from-primary-50 to-purple-50 rounded-2xl p-6">
+        <div className="mt-6 bg-gradient-to-r from-primary-50 to-purple-50 rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl">
           <h3 className="text-lg font-bold font-display tracking-tight text-gray-800 mb-2">🚀 AI Council Orchestrator</h3>
           <p className="text-gray-700">
             Experience intelligent multi-agent AI orchestration with real-time task decomposition,
