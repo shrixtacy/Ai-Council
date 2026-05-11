@@ -30,12 +30,14 @@ AI Council is a revolutionary Python-based system that intelligently coordinates
 
 In today's AI landscape, **relying on a single AI model is like using only one tool for every job**. AI Council solves this by:
 
-- **🎯 Intelligent Task Routing**: Automatically routes tasks to the most suitable AI models
-- **⚖️ Conflict Resolution**: Arbitrates between conflicting outputs from different models  
-- **💰 Cost Optimization**: Balances cost, speed, and quality based on your requirements
-- **🛡️ Reliability**: Provides fallback mechanisms and graceful failure handling
-- **📊 Transparency**: Offers structured self-assessments and confidence scoring
-- **🔧 Extensibility**: Clean architecture that grows with your needs
+- **🎯 Intelligent Task Routing**: Automatically routes tasks to the most suitable AI models based on intent and complexity.
+- **⚖️ Dynamic Conflict Resolution**: Arbitrates between conflicting outputs from different models using confidence-based weighting.
+- **💰 Advanced Cost Optimization**: Balances cost, speed, and quality with intelligent routing and per-model performance history.
+- **🛡️ Resilience & Reliability**: Features circuit breakers, exponential backoff, and distributed locking for stable production deployments.
+- **📊 Real-time Monitoring**: Detailed analytics, cost tracking, and system health monitoring through a sleek web interface.
+- **🔄 Context-Aware Fallbacks**: Intelligently handles failures by considering failure types (rate limits, filters, etc.) when picking fallbacks.
+- **⚡ Async Pipeline**: Fully rewritten asynchronous pipeline for high-performance, non-blocking execution.
+- **🔧 Extensible Architecture**: Clean, layered design that allows easy integration of new models and custom plugins.
 
 ## 🚀 Quick Start
 
@@ -386,12 +388,17 @@ cost:
 
 ## 📈 Roadmap
 
-### Coming Soon
-- **🔌 Plugin System**: Easy integration of custom AI models
-- **☁️ Cloud Deployment**: One-click cloud deployment options
-- **📊 Advanced Analytics**: Detailed performance and cost analytics
-- **🔄 Streaming Responses**: Real-time response streaming
-- **🌐 Multi-Language Support**: SDKs for other programming languages
+### 🆕 Latest Highlights (v1.3.0 - Unreleased)
+- **🧠 Context-Aware Fallbacks**: Smarter model switching based on specific failure reasons (rate limits, filters, etc.).
+- **🔒 Distributed Resilience**: Redis-backed circuit breakers ensuring stability across multi-worker deployments.
+- **🕒 Chat History v2**: Full-stack persistent history with optimized MongoDB integration and search.
+- **📈 Enhanced Analytics**: Real-time visualization of orchestration stages and cost-quality performance metrics.
+
+### 🗺️ Future Roadmap
+- **🔌 Plugin SDK**: Open ecosystem for custom agents, domain-specific validators, and model adapters.
+- **☁️ Cloud-Native Deployment**: Official Docker images, Helm charts, and one-click Terraform configurations.
+- **🔄 Streaming Pipeline**: End-to-end WebSocket streaming for real-time model interaction and UI updates.
+- **🌐 Polyglot SDKs**: Native client libraries for Node.js, Go, and Rust to expand the ecosystem.
 
 ## 🤝 Contributing
 
