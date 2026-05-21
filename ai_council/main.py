@@ -148,6 +148,18 @@ class AICouncil:
         self.logger.info("Processing request in", extra={"value": execution_mode.value})
         self.logger.debug("User input", extra={"user_input": user_input[:200]})
 
+        # ── Stage -1: Payload Size Validation ────────────────────────────
+        if len(user_input) > 100_000:
+            self.logger.error("Request rejected: Payload too large", extra={"length": len(user_input)})
+            return FinalResponse(
+                content="",
+                overall_confidence=0.0,
+                success=False,
+                error_message="Payload too large. Maximum allowed size is 100,000 characters.",
+                error_type="payload_too_large"
+            )
+        # ─────────────────────────────────────────────────────────────────
+
         # ── Stage 0: Sanitization Filter ─────────────────────────────────
         filter_result = self.sanitization_filter.check(
             user_input, source_key=session_id
