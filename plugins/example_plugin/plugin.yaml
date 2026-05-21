@@ -1,0 +1,14 @@
+name: example-plugin
+version: "1.0.0"
+description: "Example manifest-based plugin for AI Council."
+entry_point: example_plugin.plugin:register
+hooks:
+  pre_execution: example_plugin.plugin:pre_execution
+  post_arbitration: example_plugin.plugin:post_arbitration
+  post_synthesis: example_plugin.plugin:post_synthesis
+routing_rules:
+  - name: example-plugin-cost-aware
+    task_types:
+      - reasoning
+    enabled: true
+    weight: 0.5

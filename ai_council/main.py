@@ -18,6 +18,7 @@ from .core.error_handling import create_error_response
 from .core.interfaces import OrchestrationLayer
 from .utils.config import AICouncilConfig, load_config
 from .utils.logging import configure_logging, get_logger
+from .utils.plugin_manager import create_plugin_manager
 from .factory import AICouncilFactory
 from .sanitization import SanitizationFilter
 
@@ -65,8 +66,14 @@ class AICouncil:
         # This replaces the previous approach of importing and mutating the module-level global.
         _ = self.factory.adaptive_timeout_manager
         
-        # Initialize orchestration layer
-        self.orchestration_layer: OrchestrationLayer = self.factory.create_orchestration_layer()
+        # Initialize plugin manager and plugin context
+        self.plugin_manager = create_plugin_manager(self.config)
+        self.logger.info("Plugin manager initialized", extra={"plugin_count": len(self.plugin_manager.loaded_plugins)})
+
+        # Initialize orchestration layer with plugin hook support
+        self.orchestration_layer: OrchestrationLayer = self.factory.create_orchestration_layer(
+            plugin_context=self.plugin_manager.plugin_context
+        )
 
         # Initialize sanitization filter (runs before prompt construction)
         sanitization_config = (
@@ -172,6 +179,9 @@ class AICouncil:
                 error_type="prompt_injection",
             )
         # ─────────────────────────────────────────────────────────────────
+
+        if hasattr(self, 'plugin_manager') and self.plugin_manager.plugin_context:
+            self.plugin_manager.plugin_context.run_pre_execution_hooks(user_input, execution_mode)
 
         return await self._execute_with_timeout(user_input, execution_mode)
     

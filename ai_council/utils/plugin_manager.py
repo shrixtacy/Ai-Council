@@ -3,14 +3,17 @@
 import importlib
 import importlib.util
 import inspect
+import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Type, Any, Optional, Callable
+from typing import Dict, List, Tuple, Type, Any, Optional, Callable
+import yaml
 from ai_council.core.logger import get_logger
 
 from ..core.interfaces import AIModel, AnalysisEngine, TaskDecomposer, ExecutionAgent
 from ..core.interfaces import ArbitrationLayer, SynthesisLayer, ModelRegistry
-from .config import PluginConfig, AICouncilConfig
+from ..core.models import ExecutionMode
+from .config import PluginConfig, AICouncilConfig, RoutingRule
 
 logger = get_logger(__name__)
 
@@ -18,6 +21,57 @@ logger = get_logger(__name__)
 class PluginError(Exception):
     """Exception raised when plugin operations fail."""
     pass
+
+
+class PluginContext:
+    """Registry for plugin runtime hooks and routing rules."""
+
+    def __init__(self, config: AICouncilConfig, manager: "PluginManager"):
+        self.config = config
+        self.manager = manager
+        self.pre_execution_hooks: List[Callable[[str, ExecutionMode], Any]] = []
+        self.post_arbitration_hooks: List[Callable[[List[Any], Any], Any]] = []
+        self.post_synthesis_hooks: List[Callable[[Any], Any]] = []
+        self.routing_rules: List[RoutingRule] = []
+
+    def register_pre_execution_hook(self, hook: Callable[[str, ExecutionMode], Any]) -> None:
+        self.pre_execution_hooks.append(hook)
+
+    def register_post_arbitration_hook(self, hook: Callable[[List[Any], Any], Any]) -> None:
+        self.post_arbitration_hooks.append(hook)
+
+    def register_post_synthesis_hook(self, hook: Callable[[Any], Any]) -> None:
+        self.post_synthesis_hooks.append(hook)
+
+    def register_routing_rule(self, rule: Any) -> None:
+        if isinstance(rule, dict):
+            rule = RoutingRule(**rule)
+        if not isinstance(rule, RoutingRule):
+            raise PluginError("Routing rule must be a RoutingRule or dict")
+
+        self.config.add_routing_rule(rule)
+        self.routing_rules.append(rule)
+
+    def run_pre_execution_hooks(self, user_input: str, execution_mode: ExecutionMode) -> None:
+        for hook in self.pre_execution_hooks:
+            try:
+                hook(user_input, execution_mode)
+            except Exception as e:
+                logger.warning("Plugin pre-execution hook failed", extra={"error": str(e)})
+
+    def run_post_arbitration_hooks(self, validated_responses: List[Any], explanation: Any) -> None:
+        for hook in self.post_arbitration_hooks:
+            try:
+                hook(validated_responses, explanation)
+            except Exception as e:
+                logger.warning("Plugin post-arbitration hook failed", extra={"error": str(e)})
+
+    def run_post_synthesis_hooks(self, final_response: Any) -> None:
+        for hook in self.post_synthesis_hooks:
+            try:
+                hook(final_response)
+            except Exception as e:
+                logger.warning("Plugin post-synthesis hook failed", extra={"error": str(e)})
 
 
 class PluginManager:
@@ -33,6 +87,8 @@ class PluginManager:
         self.loaded_plugins: Dict[str, Any] = {}
         self.plugin_instances: Dict[str, Any] = {}
         self.plugin_types: Dict[str, Type] = {}
+        self.manifest_plugins: Dict[str, Dict[str, Any]] = {}
+        self.plugin_context = PluginContext(config, self)
         
         # Supported plugin interfaces
         self.supported_interfaces = {
@@ -46,7 +102,8 @@ class PluginManager:
         }
     
     def load_all_plugins(self) -> None:
-        """Load all enabled plugins from configuration."""
+        """Load all enabled plugins from configuration and discover manifest-based plugins."""
+        # Load explicit plugin definitions from config first.
         for plugin_name, plugin_config in self.config.plugins.items():
             if plugin_config.enabled:
                 try:
@@ -55,16 +112,26 @@ class PluginManager:
                     logger.error("Failed to load plugin", extra={"plugin_name": plugin_name, "error": str(e)})
                     if self.config.debug:
                         raise
+
+        # Discover and load manifest-based plugins from the plugin directory.
+        for plugin_folder, manifest_data in self.discover_plugin_manifests():
+            try:
+                self.load_manifest_plugin(plugin_folder, manifest_data)
+            except Exception as e:
+                logger.error("Failed to load manifest plugin", extra={"plugin_folder": str(plugin_folder), "error": str(e)})
+                if self.config.debug:
+                    raise
     
-    def load_plugin(self, plugin_name: str, plugin_config: PluginConfig) -> Any:
+    def load_plugin(self, plugin_name: str, plugin_config: PluginConfig, plugin_base_path: Optional[Path] = None) -> Any:
         """Load a specific plugin.
         
         Args:
             plugin_name: Name of the plugin
             plugin_config: Configuration for the plugin
+            plugin_base_path: Optional path used to resolve entry points
             
         Returns:
-            The loaded plugin class
+            The loaded plugin class or registered plugin object
             
         Raises:
             PluginError: If plugin loading fails
@@ -72,26 +139,27 @@ class PluginManager:
         try:
             # Check dependencies
             self._check_dependencies(plugin_config.dependencies)
-            
-            # Import the plugin module
+
+            if plugin_config.entry_point:
+                # Load entry point style plugins that register hooks/context
+                base_path = plugin_base_path or Path(self.config.plugin_dir)
+                entry_callable = self._get_entry_point_callable(plugin_config.entry_point, base_path)
+                plugin_obj = entry_callable(self.plugin_context)
+                self.loaded_plugins[plugin_name] = plugin_obj or entry_callable
+                logger.info("Successfully loaded plugin entry point", extra={"plugin_name": plugin_name})
+                return plugin_obj
+
+            # Preserve existing module/class plugin loading behavior
             module = importlib.import_module(plugin_config.module_path)
-            
-            # Get the plugin class
             if not hasattr(module, plugin_config.class_name):
                 raise PluginError(f"Class {plugin_config.class_name} not found in module {plugin_config.module_path}")
-            
             plugin_class = getattr(module, plugin_config.class_name)
-            
-            # Validate plugin interface
             interface_type = self._validate_plugin_interface(plugin_class)
-            
-            # Store plugin information
             self.loaded_plugins[plugin_name] = plugin_class
             self.plugin_types[plugin_name] = interface_type
-            
             logger.info("Successfully loaded plugin", extra={"plugin_name": plugin_name, "interface_type": interface_type.__name__})
             return plugin_class
-            
+
         except Exception as e:
             raise PluginError(f"Failed to load plugin {plugin_name}: {e}")
     
@@ -274,16 +342,150 @@ class PluginManager:
         
         self.config.add_plugin(plugin_config)
         return plugin_name
-    
+
+    def discover_plugin_manifests(self, plugin_dir: Optional[str] = None) -> List[Tuple[Path, Dict[str, Any]]]:
+        """Discover plugin manifest files under the plugin directory."""
+        if plugin_dir is None:
+            plugin_dir = self.config.plugin_dir
+
+        plugin_path = Path(plugin_dir)
+        if not plugin_path.exists():
+            return []
+
+        manifests = []
+        for plugin_folder in plugin_path.iterdir():
+            if not plugin_folder.is_dir():
+                continue
+
+            manifest_path = None
+            for candidate in (plugin_folder / 'plugin.yaml', plugin_folder / 'plugin.yml', plugin_folder / 'plugin.json'):
+                if candidate.exists():
+                    manifest_path = candidate
+                    break
+
+            if manifest_path is None:
+                continue
+
+            manifest_data = self._load_manifest_file(manifest_path)
+            if manifest_data:
+                manifests.append((plugin_folder, manifest_data))
+
+        return manifests
+
+    def load_manifest_plugin(self, plugin_folder: Path, manifest_data: Dict[str, Any]) -> None:
+        """Load a plugin from a manifest file."""
+        self._validate_manifest_data(manifest_data)
+
+        plugin_name = manifest_data['name']
+        if plugin_name in self.config.plugins:
+            logger.warning("Manifest plugin skipped because config plugin already exists", extra={"plugin_name": plugin_name})
+            return
+
+        if not manifest_data.get('enabled', True):
+            logger.info("Manifest plugin disabled", extra={"plugin_name": plugin_name})
+            return
+
+        plugin_config = PluginConfig(
+            name=plugin_name,
+            entry_point=manifest_data['entry_point'],
+            enabled=manifest_data.get('enabled', True),
+            config=manifest_data.get('config', {}),
+            dependencies=manifest_data.get('dependencies', []),
+            version=manifest_data.get('version', '1.0.0'),
+            description=manifest_data.get('description', ''),
+            hooks=manifest_data.get('hooks', {}),
+            routing_rules=manifest_data.get('routing_rules', []),
+        )
+
+        self.config.add_plugin(plugin_config)
+        self.manifest_plugins[plugin_name] = manifest_data
+
+        # Register routing rules from manifest
+        for routing_rule in manifest_data.get('routing_rules', []):
+            try:
+                self.plugin_context.register_routing_rule(routing_rule)
+            except Exception as e:
+                logger.warning("Could not register manifest routing rule", extra={"plugin_name": plugin_name, "error": str(e)})
+
+        # Load the plugin entry point and call its register() function
+        self.load_plugin(plugin_name, plugin_config, plugin_folder)
+
+        # Register any hooks defined in the manifest directly
+        for hook_name, hook_entry in manifest_data.get('hooks', {}).items():
+            try:
+                hook_callable = self._get_entry_point_callable(hook_entry, plugin_folder)
+                self._register_hook(hook_name, hook_callable)
+            except Exception as e:
+                logger.warning("Could not load manifest hook", extra={"plugin_name": plugin_name, "hook": hook_name, "error": str(e)})
+
+    def _load_manifest_file(self, manifest_path: Path) -> Optional[Dict[str, Any]]:
+        try:
+            if manifest_path.suffix.lower() == '.json':
+                with open(manifest_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            logger.warning("Failed to parse plugin manifest", extra={"manifest_path": str(manifest_path), "error": str(e)})
+            return None
+
+    def _validate_manifest_data(self, manifest_data: Dict[str, Any]) -> None:
+        missing_fields = [field for field in ('name', 'version', 'entry_point') if field not in manifest_data or not manifest_data[field]]
+        if missing_fields:
+            raise PluginError(f"Plugin manifest missing required fields: {', '.join(missing_fields)}")
+
+    def _get_entry_point_callable(self, entry_point: str, plugin_folder: Path) -> Callable:
+        if ':' in entry_point:
+            module_name, attr_name = entry_point.split(':', 1)
+        elif '.' in entry_point:
+            module_name, attr_name = entry_point.rsplit('.', 1)
+        else:
+            module_name, attr_name = entry_point, 'register'
+
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            # Support both plugin folder and plugin root inputs.
+            candidate_roots = [plugin_folder]
+            if plugin_folder.parent not in candidate_roots:
+                candidate_roots.append(plugin_folder.parent)
+
+            imported = False
+            last_error: Optional[Exception] = None
+            for root in candidate_roots:
+                root_str = str(root)
+                if root_str not in sys.path:
+                    sys.path.insert(0, root_str)
+                try:
+                    module = importlib.import_module(module_name)
+                    imported = True
+                    break
+                except ImportError as e:
+                    last_error = e
+
+            if not imported:
+                raise PluginError(f"Could not import module for entry point {entry_point}: {last_error}")
+
+        if not hasattr(module, attr_name):
+            raise PluginError(f"Entry point {attr_name} not found in module {module_name}")
+
+        hook_callable = getattr(module, attr_name)
+        if not callable(hook_callable):
+            raise PluginError(f"Entry point {entry_point} is not callable")
+        return hook_callable
+
+    def _register_hook(self, hook_name: str, hook_callable: Callable) -> None:
+        if hook_name == 'pre_execution':
+            self.plugin_context.register_pre_execution_hook(hook_callable)
+        elif hook_name == 'post_arbitration':
+            self.plugin_context.register_post_arbitration_hook(hook_callable)
+        elif hook_name == 'post_synthesis':
+            self.plugin_context.register_post_synthesis_hook(hook_callable)
+        else:
+            raise PluginError(f"Unsupported hook name: {hook_name}")
+
     def _check_dependencies(self, dependencies: List[str]) -> None:
-        """Check if plugin dependencies are satisfied.
-        
-        Args:
-            dependencies: List of required dependencies
-            
-        Raises:
-            PluginError: If dependencies are not satisfied
-        """
+        """Check if plugin dependencies are satisfied."""
         for dependency in dependencies:
             try:
                 importlib.import_module(dependency)
