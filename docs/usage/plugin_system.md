@@ -8,7 +8,7 @@ A manifest-based plugin lives in its own folder under `plugins/`.
 
 Example:
 
-```
+```text
 plugins/example_plugin/
   plugin.py
   plugin.yaml
@@ -27,6 +27,9 @@ Required fields:
 Optional fields:
 
 - `description`: Free-form plugin description
+- `enabled`: Enable/disable loading for a manifest plugin
+- `dependencies`: Python module dependencies checked before plugin load
+- `config`: Plugin-specific configuration dictionary
 - `hooks`: Map hook names to entry points
 - `routing_rules`: List of routing rule definitions
 

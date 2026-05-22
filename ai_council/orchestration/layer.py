@@ -491,6 +491,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 logger.warning("Arbitration unpacking failed", extra={"error": str(e)})
                 validated_responses = successful_responses[:1]
                 explanation = None
+                arbitration_decisions = []
             
             execution_metadata.execution_path.append("arbitration")
 

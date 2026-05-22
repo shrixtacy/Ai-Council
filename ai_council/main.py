@@ -7,7 +7,6 @@ components of the AI Council system and provides a simple interface
 for processing user requests.
 """
 
-from ai_council.core.logger import get_logger
 import sys
 import asyncio
 from pathlib import Path

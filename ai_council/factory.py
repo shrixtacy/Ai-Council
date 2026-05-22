@@ -5,8 +5,7 @@ This module provides a factory class that creates and configures all
 AI Council components based on the provided configuration.
 """
 
-from ai_council.core.logger import get_logger
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from .core.interfaces import (
     OrchestrationLayer, AnalysisEngine, TaskDecomposer, ModelContextProtocol,

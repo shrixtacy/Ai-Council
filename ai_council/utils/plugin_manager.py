@@ -4,15 +4,16 @@ import importlib
 import importlib.util
 import inspect
 import json
-import sys
 from pathlib import Path
-from typing import Dict, List, Tuple, Type, Any, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+
 import yaml
+
 from ai_council.core.logger import get_logger
 
 from ..core.interfaces import AIModel, AnalysisEngine, TaskDecomposer, ExecutionAgent
 from ..core.interfaces import ArbitrationLayer, SynthesisLayer, ModelRegistry
-from ..core.models import ExecutionMode
+from ..core.models import ExecutionMode, Priority, RiskLevel, TaskType
 from .config import PluginConfig, AICouncilConfig, RoutingRule
 
 logger = get_logger(__name__)
@@ -45,7 +46,7 @@ class PluginContext:
 
     def register_routing_rule(self, rule: Any) -> None:
         if isinstance(rule, dict):
-            rule = RoutingRule(**rule)
+            rule = self.manager._normalize_routing_rule_from_manifest(rule)
         if not isinstance(rule, RoutingRule):
             raise PluginError("Routing rule must be a RoutingRule or dict")
 
@@ -377,26 +378,16 @@ class PluginManager:
         self._validate_manifest_data(manifest_data)
 
         plugin_name = manifest_data['name']
-        if plugin_name in self.config.plugins:
-            logger.warning("Manifest plugin skipped because config plugin already exists", extra={"plugin_name": plugin_name})
-            return
-
-        if not manifest_data.get('enabled', True):
+        existing_plugin = self.config.plugins.get(plugin_name)
+        if existing_plugin is None and not manifest_data.get('enabled', True):
             logger.info("Manifest plugin disabled", extra={"plugin_name": plugin_name})
             return
 
-        plugin_config = PluginConfig(
-            name=plugin_name,
-            entry_point=manifest_data['entry_point'],
-            enabled=manifest_data.get('enabled', True),
-            config=manifest_data.get('config', {}),
-            dependencies=manifest_data.get('dependencies', []),
-            version=manifest_data.get('version', '1.0.0'),
-            description=manifest_data.get('description', ''),
-            hooks=manifest_data.get('hooks', {}),
-            routing_rules=manifest_data.get('routing_rules', []),
+        plugin_config = self._merge_manifest_into_plugin_config(
+            plugin_name=plugin_name,
+            manifest_data=manifest_data,
+            existing_plugin=existing_plugin,
         )
-
         self.config.add_plugin(plugin_config)
         self.manifest_plugins[plugin_name] = manifest_data
 
@@ -434,6 +425,87 @@ class PluginManager:
         if missing_fields:
             raise PluginError(f"Plugin manifest missing required fields: {', '.join(missing_fields)}")
 
+    def _merge_manifest_into_plugin_config(
+        self,
+        plugin_name: str,
+        manifest_data: Dict[str, Any],
+        existing_plugin: Optional[PluginConfig],
+    ) -> PluginConfig:
+        """Merge manifest metadata with existing config while preserving explicit config overrides."""
+        if existing_plugin is None:
+            return PluginConfig(
+                name=plugin_name,
+                entry_point=manifest_data['entry_point'],
+                enabled=manifest_data.get('enabled', True),
+                config=manifest_data.get('config', {}),
+                dependencies=manifest_data.get('dependencies', []),
+                version=manifest_data.get('version', '1.0.0'),
+                description=manifest_data.get('description', ''),
+                hooks=manifest_data.get('hooks', {}),
+                routing_rules=manifest_data.get('routing_rules', []),
+            )
+
+        merged_config = {
+            **manifest_data.get('config', {}),
+            **existing_plugin.config,
+        }
+        merged_dependencies = existing_plugin.dependencies or manifest_data.get('dependencies', [])
+        merged_hooks = {
+            **manifest_data.get('hooks', {}),
+            **existing_plugin.hooks,
+        }
+        merged_routing_rules = existing_plugin.routing_rules or manifest_data.get('routing_rules', [])
+
+        effective_entry_point = existing_plugin.entry_point
+        if not effective_entry_point and not existing_plugin.module_path:
+            effective_entry_point = manifest_data['entry_point']
+
+        return PluginConfig(
+            name=plugin_name,
+            module_path=existing_plugin.module_path,
+            class_name=existing_plugin.class_name,
+            entry_point=effective_entry_point,
+            enabled=existing_plugin.enabled,
+            config=merged_config,
+            dependencies=merged_dependencies,
+            version=existing_plugin.version or manifest_data.get('version', '1.0.0'),
+            description=existing_plugin.description or manifest_data.get('description', ''),
+            hooks=merged_hooks,
+            routing_rules=merged_routing_rules,
+        )
+
+    def _convert_enum_list(self, values: List[Any], enum_class: Type) -> List[Any]:
+        """Convert manifest string values to enum values when possible."""
+        converted: List[Any] = []
+        for value in values:
+            if not isinstance(value, str):
+                converted.append(value)
+                continue
+
+            candidates = [value, value.lower(), value.upper()]
+            converted_value = value
+            for candidate in candidates:
+                try:
+                    converted_value = enum_class(candidate)
+                    break
+                except ValueError:
+                    continue
+            converted.append(converted_value)
+        return converted
+
+    def _normalize_routing_rule_from_manifest(self, rule_data: Dict[str, Any]) -> RoutingRule:
+        """Normalize routing rule dictionary values for enum-backed fields."""
+        normalized = dict(rule_data)
+        if 'task_types' in normalized:
+            normalized['task_types'] = self._convert_enum_list(normalized['task_types'], TaskType)
+        if 'priority_levels' in normalized:
+            normalized['priority_levels'] = self._convert_enum_list(normalized['priority_levels'], Priority)
+        if 'risk_levels' in normalized:
+            normalized['risk_levels'] = self._convert_enum_list(normalized['risk_levels'], RiskLevel)
+        if 'execution_modes' in normalized:
+            normalized['execution_modes'] = self._convert_enum_list(normalized['execution_modes'], ExecutionMode)
+        return RoutingRule(**normalized)
+
     def _get_entry_point_callable(self, entry_point: str, plugin_folder: Path) -> Callable:
         if ':' in entry_point:
             module_name, attr_name = entry_point.split(':', 1)
@@ -445,26 +517,7 @@ class PluginManager:
         try:
             module = importlib.import_module(module_name)
         except ImportError:
-            # Support both plugin folder and plugin root inputs.
-            candidate_roots = [plugin_folder]
-            if plugin_folder.parent not in candidate_roots:
-                candidate_roots.append(plugin_folder.parent)
-
-            imported = False
-            last_error: Optional[Exception] = None
-            for root in candidate_roots:
-                root_str = str(root)
-                if root_str not in sys.path:
-                    sys.path.insert(0, root_str)
-                try:
-                    module = importlib.import_module(module_name)
-                    imported = True
-                    break
-                except ImportError as e:
-                    last_error = e
-
-            if not imported:
-                raise PluginError(f"Could not import module for entry point {entry_point}: {last_error}")
+            module = self._load_entry_point_module_from_path(module_name, plugin_folder)
 
         if not hasattr(module, attr_name):
             raise PluginError(f"Entry point {attr_name} not found in module {module_name}")
@@ -473,6 +526,28 @@ class PluginManager:
         if not callable(hook_callable):
             raise PluginError(f"Entry point {entry_point} is not callable")
         return hook_callable
+
+    def _load_entry_point_module_from_path(self, module_name: str, plugin_folder: Path):
+        """Load a plugin module from explicit plugin paths without mutating sys.path globally."""
+        module_parts = module_name.split('.')
+        candidate_files: List[Path] = []
+
+        if plugin_folder.name == module_parts[0] and len(module_parts) > 1:
+            candidate_files.append(plugin_folder.joinpath(*module_parts[1:]).with_suffix('.py'))
+        candidate_files.append(plugin_folder.joinpath(*module_parts).with_suffix('.py'))
+        candidate_files.append(plugin_folder.parent.joinpath(*module_parts).with_suffix('.py'))
+
+        for module_file in candidate_files:
+            if not module_file.exists():
+                continue
+            spec = importlib.util.spec_from_file_location(module_name, module_file)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        raise PluginError(f"Could not import module for entry point {module_name} from plugin path {plugin_folder}")
 
     def _register_hook(self, hook_name: str, hook_callable: Callable) -> None:
         if hook_name == 'pre_execution':
