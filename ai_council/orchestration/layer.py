@@ -531,20 +531,20 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         except Exception as e:
             logger.error("Request processing failed", extra={"error": str(e)})
             execution_time = time.time() - start_time
-            
+
             # Record system failure
-        failure_event = create_failure_event(
-            failure_type=FailureType.SYSTEM_OVERLOAD,
-            component="orchestration_layer",
-            error_message=str(e),
-            context={"execution_time": execution_time}
-        )
-        resilience_manager.handle_failure(failure_event)
-            
-        return create_error_response(
-            e,
-            context={'component': 'orchestration_layer.process_request'}
-        )
+            failure_event = create_failure_event(
+                failure_type=FailureType.SYSTEM_OVERLOAD,
+                component="orchestration_layer",
+                error_message=str(e),
+                context={"execution_time": execution_time}
+            )
+            resilience_manager.handle_failure(failure_event)
+
+            return create_error_response(
+                e,
+                context={'component': 'orchestration_layer.process_request'}
+            )
     
     # =========================================================================
     # PROTECTED METHODS - With circuit breaker protection
