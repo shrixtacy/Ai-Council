@@ -288,7 +288,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     async def _stage_arbitrate(self, responses: List[AgentResponse]):
 
         if len(responses) <= 1:
-            return responses, {
+            explanation = {
                 "selected_model": responses[0].model_used if responses else None,
                 "confidence": responses[0].self_assessment.confidence_score if responses and responses[0].self_assessment else 0.5,
                 "reason": "Only one model response available",
@@ -296,6 +296,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 "similarity_score": 1.0,
                 "conflict_detected": False
             }
+            return responses, explanation, []
 
         try:
             # ✅ 1. Collect model data

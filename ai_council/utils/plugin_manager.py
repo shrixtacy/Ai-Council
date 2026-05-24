@@ -4,6 +4,7 @@ import importlib
 import importlib.util
 import inspect
 import json
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
@@ -104,7 +105,16 @@ class PluginManager:
     
     def load_all_plugins(self) -> None:
         """Load all enabled plugins from configuration and discover manifest-based plugins."""
-        # Load explicit plugin definitions from config first.
+        # Discover and merge manifest-based plugins first, before loading config plugins.
+        for plugin_folder, manifest_data in self.discover_plugin_manifests():
+            try:
+                self.load_manifest_plugin(plugin_folder, manifest_data)
+            except Exception as e:
+                logger.error("Failed to load manifest plugin", extra={"plugin_folder": str(plugin_folder), "error": str(e)})
+                if self.config.debug:
+                    raise
+
+        # Load explicit plugin definitions from config.
         for plugin_name, plugin_config in self.config.plugins.items():
             if plugin_config.enabled:
                 try:
@@ -113,15 +123,6 @@ class PluginManager:
                     logger.error("Failed to load plugin", extra={"plugin_name": plugin_name, "error": str(e)})
                     if self.config.debug:
                         raise
-
-        # Discover and load manifest-based plugins from the plugin directory.
-        for plugin_folder, manifest_data in self.discover_plugin_manifests():
-            try:
-                self.load_manifest_plugin(plugin_folder, manifest_data)
-            except Exception as e:
-                logger.error("Failed to load manifest plugin", extra={"plugin_folder": str(plugin_folder), "error": str(e)})
-                if self.config.debug:
-                    raise
     
     def load_plugin(self, plugin_name: str, plugin_config: PluginConfig, plugin_base_path: Optional[Path] = None) -> Any:
         """Load a specific plugin.
@@ -391,8 +392,13 @@ class PluginManager:
         self.config.add_plugin(plugin_config)
         self.manifest_plugins[plugin_name] = manifest_data
 
-        # Register routing rules from manifest
-        for routing_rule in manifest_data.get('routing_rules', []):
+        # Skip loading if plugin is disabled after merge
+        if not plugin_config.enabled:
+            logger.info("Manifest plugin disabled after merge", extra={"plugin_name": plugin_name})
+            return
+
+        # Register routing rules from plugin_config (post-merge source of truth)
+        for routing_rule in plugin_config.routing_rules:
             try:
                 self.plugin_context.register_routing_rule(routing_rule)
             except Exception as e:
@@ -401,8 +407,8 @@ class PluginManager:
         # Load the plugin entry point and call its register() function
         self.load_plugin(plugin_name, plugin_config, plugin_folder)
 
-        # Register any hooks defined in the manifest directly
-        for hook_name, hook_entry in manifest_data.get('hooks', {}).items():
+        # Register any hooks defined in plugin_config (post-merge source of truth)
+        for hook_name, hook_entry in plugin_config.hooks.items():
             try:
                 hook_callable = self._get_entry_point_callable(hook_entry, plugin_folder)
                 self._register_hook(hook_name, hook_callable)
