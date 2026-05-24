@@ -60,7 +60,8 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         synthesis_layer: SynthesisLayer,
         model_registry: ModelRegistry,
         max_retries: int = 3,
-        timeout_seconds: float = 300.0
+        timeout_seconds: float = 300.0,
+        plugin_context: Optional[Any] = None
     ):
         """
         Initialize the orchestration layer with all required components.
@@ -75,6 +76,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             model_registry: Registry of available AI models
             max_retries: Maximum retry attempts for failed operations
             timeout_seconds: Maximum time allowed for request processing
+            plugin_context: Optional plugin context for runtime hooks
         """
         self.analysis_engine = analysis_engine
         self.task_decomposer = task_decomposer
@@ -85,6 +87,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         self.model_registry = model_registry
         self.max_retries = max_retries
         self.timeout_seconds = timeout_seconds
+        self.plugin_context = plugin_context
         
         # Initialize cost optimizer
         self.cost_optimizer = CostOptimizer(model_registry)
@@ -285,7 +288,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
     async def _stage_arbitrate(self, responses: List[AgentResponse]):
 
         if len(responses) <= 1:
-            return responses, {
+            explanation = {
                 "selected_model": responses[0].model_used if responses else None,
                 "confidence": responses[0].self_assessment.confidence_score if responses and responses[0].self_assessment else 0.5,
                 "reason": "Only one model response available",
@@ -293,6 +296,7 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
                 "similarity_score": 1.0,
                 "conflict_detected": False
             }
+            return responses, explanation, []
 
         try:
             # ✅ 1. Collect model data
@@ -482,19 +486,26 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
             
             # Stage 6: Arbitration
             try:
-                validated_responses, explanation,arbitration_decisions = await self._stage_arbitrate(successful_responses)
+                validated_responses, explanation, arbitration_decisions = await self._stage_arbitrate(successful_responses)
 
             except Exception as e:
                 logger.warning("Arbitration unpacking failed", extra={"error": str(e)})
                 validated_responses = successful_responses[:1]
                 explanation = None
+                arbitration_decisions = []
             
             execution_metadata.execution_path.append("arbitration")
+
+            if self.plugin_context:
+                self.plugin_context.run_post_arbitration_hooks(validated_responses, explanation)
             
             # Stage 7: Synthesis
             final_response = await self._stage_synthesize(validated_responses)
             final_response.explanation = explanation
             final_response.arbitration_decisions = arbitration_decisions
+
+            if self.plugin_context:
+                self.plugin_context.run_post_synthesis_hooks(final_response)
             execution_metadata.execution_path.append("synthesis")
             
             # Stage 8: Attach Metadata
@@ -520,20 +531,20 @@ class ConcreteOrchestrationLayer(OrchestrationLayer):
         except Exception as e:
             logger.error("Request processing failed", extra={"error": str(e)})
             execution_time = time.time() - start_time
-            
+
             # Record system failure
-        failure_event = create_failure_event(
-            failure_type=FailureType.SYSTEM_OVERLOAD,
-            component="orchestration_layer",
-            error_message=str(e),
-            context={"execution_time": execution_time}
-        )
-        resilience_manager.handle_failure(failure_event)
-            
-        return create_error_response(
-            e,
-            context={'component': 'orchestration_layer.process_request'}
-        )
+            failure_event = create_failure_event(
+                failure_type=FailureType.SYSTEM_OVERLOAD,
+                component="orchestration_layer",
+                error_message=str(e),
+                context={"execution_time": execution_time}
+            )
+            resilience_manager.handle_failure(failure_event)
+
+            return create_error_response(
+                e,
+                context={'component': 'orchestration_layer.process_request'}
+            )
     
     # =========================================================================
     # PROTECTED METHODS - With circuit breaker protection

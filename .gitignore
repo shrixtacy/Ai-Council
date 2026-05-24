@@ -176,6 +176,8 @@ logs/
 *.log
 plugins/*
 !plugins/.gitkeep
+!plugins/example_plugin/
+!plugins/example_plugin/**
 demo_config.yaml
 *_example.py
 usage_example.py

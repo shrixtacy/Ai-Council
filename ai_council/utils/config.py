@@ -33,10 +33,14 @@ class PluginConfig:
     name: str = ""
     module_path: str = ""
     class_name: str = ""
+    entry_point: str = ""
     enabled: bool = True
     config: Dict[str, Any] = field(default_factory=dict)
     dependencies: List[str] = field(default_factory=list)
     version: str = "1.0.0"
+    description: str = ""
+    hooks: Dict[str, str] = field(default_factory=dict)
+    routing_rules: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -368,10 +372,14 @@ class AICouncilConfig:
                 name: {
                     'module_path': config.module_path,
                     'class_name': config.class_name,
+                    'entry_point': config.entry_point,
                     'enabled': config.enabled,
                     'config': config.config,
                     'dependencies': config.dependencies,
                     'version': config.version,
+                    'description': config.description,
+                    'hooks': config.hooks,
+                    'routing_rules': config.routing_rules,
                 }
                 for name, config in self.plugins.items()
             },
@@ -568,11 +576,15 @@ class AICouncilConfig:
         
         # Validate plugin configs
         for plugin_name, plugin_config in self.plugins.items():
-            if not plugin_config.module_path:
-                raise ValueError(f"Plugin {plugin_name}: module_path is required")
+            if not plugin_config.entry_point and not plugin_config.module_path:
+                raise ValueError(f"Plugin {plugin_name}: either module_path/class_name or entry_point is required")
             
-            if not plugin_config.class_name:
-                raise ValueError(f"Plugin {plugin_name}: class_name is required")
+            if plugin_config.module_path and not plugin_config.class_name:
+                raise ValueError(f"Plugin {plugin_name}: class_name is required when using module_path")
+            
+            if plugin_config.entry_point and plugin_config.module_path:
+                # Both styles are allowed, but entry_point takes precedence when present.
+                pass
         
         # Validate directories exist or can be created
         for dir_path in [self.data_dir, self.cache_dir, self.plugin_dir]:

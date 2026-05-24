@@ -164,6 +164,20 @@ class TestPluginConfig:
         assert config.class_name == "CustomModelAdapter"
         assert "api_url" in config.config
 
+    def test_plugin_config_with_entry_point(self):
+        """Test PluginConfig with entry point registration."""
+        config = PluginConfig(
+            name="example-plugin",
+            entry_point="example_plugin.plugin:register",
+            enabled=True,
+            version="1.2.0",
+            description="Example entry point plugin",
+        )
+
+        assert config.entry_point == "example_plugin.plugin:register"
+        assert config.version == "1.2.0"
+        assert config.description == "Example entry point plugin"
+
 
 # =============================================================================
 # ExecutionModeConfig Tests

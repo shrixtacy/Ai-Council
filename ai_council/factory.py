@@ -5,8 +5,7 @@ This module provides a factory class that creates and configures all
 AI Council components based on the provided configuration.
 """
 
-from ai_council.core.logger import get_logger
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .core.interfaces import (
     OrchestrationLayer, AnalysisEngine, TaskDecomposer, ModelContextProtocol,
@@ -158,10 +157,13 @@ class AICouncilFactory:
             self._synthesis_layer = self._create_synthesis_layer()
         return self._synthesis_layer
     
-    def create_orchestration_layer(self) -> OrchestrationLayer:
+    def create_orchestration_layer(self, plugin_context: Optional[Any] = None) -> OrchestrationLayer:
         """
         Create the main orchestration layer with all dependencies.
         
+        Args:
+            plugin_context: Optional plugin context for runtime hook registration
+
         Returns:
             OrchestrationLayer: Fully configured orchestration layer
         """
@@ -177,7 +179,8 @@ class AICouncilFactory:
             synthesis_layer=self.synthesis_layer,
             model_registry=self.model_registry,
             max_retries=self.config.execution.max_retries,
-            timeout_seconds=self.config.execution.default_timeout_seconds
+            timeout_seconds=self.config.execution.default_timeout_seconds,
+            plugin_context=plugin_context
         )
         
         self.logger.info("Orchestration layer created successfully")
