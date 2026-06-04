@@ -218,6 +218,9 @@ frontend/.env.local
 frontend/.env.local.*
 frontend/.env*.local
 
+# Root node_modules should be ignored
+node_modules/
+
 # Backend
 backend/.env
 backend/.env.local
